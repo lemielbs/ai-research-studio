@@ -14,7 +14,95 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      chapters: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          position: number
+          product_id: string
+          summary: string | null
+          title: string
+          user_id: string
+        }
+        Insert: {
+          content?: string
+          created_at?: string
+          id?: string
+          position?: number
+          product_id: string
+          summary?: string | null
+          title?: string
+          user_id?: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          position?: number
+          product_id?: string
+          summary?: string | null
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chapters_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      products: {
+        Row: {
+          audience: string | null
+          cover_url: string | null
+          created_at: string
+          id: string
+          product_type: string
+          sales_kit: Json | null
+          status: string
+          subtitle: string | null
+          title: string
+          tone: string | null
+          topic: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          audience?: string | null
+          cover_url?: string | null
+          created_at?: string
+          id?: string
+          product_type?: string
+          sales_kit?: Json | null
+          status?: string
+          subtitle?: string | null
+          title?: string
+          tone?: string | null
+          topic?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          audience?: string | null
+          cover_url?: string | null
+          created_at?: string
+          id?: string
+          product_type?: string
+          sales_kit?: Json | null
+          status?: string
+          subtitle?: string | null
+          title?: string
+          tone?: string | null
+          topic?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
