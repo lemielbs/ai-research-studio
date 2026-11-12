@@ -29,7 +29,7 @@ const plans = [
   { name: "Business", price: "$79", note: "per month", feats: ["Everything in Pro", "Team seats", "Bulk generation", "White-label PDFs"] },
 ];
 
-const faqs = [
+const faqs: [string, string][] = [
   ["Do I need writing or design skills?", "No. The AI writes the content, the copy and creates the cover. You just pick and tweak."],
   ["Can I sell what I create?", "Yes — the products are yours to sell on any marketplace."],
   ["How long does one product take?", "Usually 5–10 minutes from topic to downloadable PDF."],

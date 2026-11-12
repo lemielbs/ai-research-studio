@@ -41,7 +41,7 @@ function Dashboard() {
       ) : (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {data.map((p) => (
-            <Link key={p.id} to="/products/$id" params={{ id: p.id }} className="group overflow-hidden rounded-2xl border bg-card transition hover:border-primary">
+            <Link key={p.id} to="/products/$id" params={{ id: p.id }} search={{ autowrite: undefined }} className="group overflow-hidden rounded-2xl border bg-card transition hover:border-primary">
               <div className="aspect-[3/2] bg-muted">
                 {p.cover_url ? <img src={p.cover_url} alt="" className="h-full w-full object-cover" /> : <div className="grid-bg h-full w-full" />}
               </div>
