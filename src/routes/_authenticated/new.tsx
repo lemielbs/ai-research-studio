@@ -47,9 +47,10 @@ function NewProduct() {
   const [picked, setPicked] = useState<Angle | null>(null);
   const [outline, setOutline] = useState<OL[]>([]);
 
-  const run = async <T,>(fn: () => Promise<T>) => {
+  const run = async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
     setBusy(true);
     try { return await fn(); } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+    return undefined;
   };
 
   const getAngles = () => run(async () => {

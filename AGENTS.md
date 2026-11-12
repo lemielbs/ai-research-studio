@@ -28,3 +28,6 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+- AI calls live in src/lib/ai.functions.ts as auth-protected server functions; why: keeps prompts and the AI key on the server.
+- Product covers are stored as image data in products.cover_url; why: avoids a storage bucket for one image per product.

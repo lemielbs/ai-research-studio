@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export const Route = createFileRoute("/_authenticated/products/$id")({
-  validateSearch: (s: Record<string, unknown>) => ({ autowrite: s.autowrite === true || s.autowrite === "true" ? true : undefined }),
+  validateSearch: (s: Record<string, unknown>) => ({ autowrite: s['autowrite'] === true || s['autowrite'] === "true" ? true : undefined }),
   head: () => ({ meta: [{ title: "Edit product — Synthforge" }] }),
   component: ProductPage,
 });
@@ -102,8 +102,8 @@ function ProductPage() {
   const move = (i: number, d: number) => task("move", async () => {
     const ch = data!.ch; const j = i + d;
     if (j < 0 || j >= ch.length) return;
-    await supabase.from("chapters").update({ position: j }).eq("id", ch[i].id);
-    await supabase.from("chapters").update({ position: i }).eq("id", ch[j].id);
+    await supabase.from("chapters").update({ position: j }).eq("id", ch[i]!.id);
+    await supabase.from("chapters").update({ position: i }).eq("id", ch[j]!.id);
   });
 
   const del = async () => {

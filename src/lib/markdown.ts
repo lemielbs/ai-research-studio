@@ -17,10 +17,10 @@ export function mdToHtml(md: string): string {
     const l = raw.trim();
     if (!l) { close(); continue; }
     let m;
-    if ((m = l.match(/^#{3,}\s+(.*)/))) { close(); html += `<h3>${inline(m[1])}</h3>`; }
-    else if ((m = l.match(/^#{1,2}\s+(.*)/))) { close(); html += `<h2>${inline(m[1])}</h2>`; }
-    else if ((m = l.match(/^[-*]\s+(.*)/))) { if (list !== "ul") { close(); html += "<ul>"; list = "ul"; } html += `<li>${inline(m[1])}</li>`; }
-    else if ((m = l.match(/^\d+[.)]\s+(.*)/))) { if (list !== "ol") { close(); html += "<ol>"; list = "ol"; } html += `<li>${inline(m[1])}</li>`; }
+    if ((m = l.match(/^#{3,}\s+(.*)/))) { close(); html += `<h3>${inline(m[1] ?? "")}</h3>`; }
+    else if ((m = l.match(/^#{1,2}\s+(.*)/))) { close(); html += `<h2>${inline(m[1] ?? "")}</h2>`; }
+    else if ((m = l.match(/^[-*]\s+(.*)/))) { if (list !== "ul") { close(); html += "<ul>"; list = "ul"; } html += `<li>${inline(m[1] ?? "")}</li>`; }
+    else if ((m = l.match(/^\d+[.)]\s+(.*)/))) { if (list !== "ol") { close(); html += "<ol>"; list = "ol"; } html += `<li>${inline(m[1] ?? "")}</li>`; }
     else { close(); html += `<p>${inline(l)}</p>`; }
   }
   close();
