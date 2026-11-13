@@ -20,7 +20,7 @@ type Angle = { title: string; subtitle: string; why: string; promise?: string; u
 type Idea = { topic: string; audience: string; pain: string; worsening: string; unlocks: Unlocks };
 const PILLARS = ["", "wealth", "health", "relationships", "hobbies"];
 
-export function UnlockBars({ u }: { u?: Unlocks }) {
+function UnlockBars({ u }: { u?: Unlocks }) {
   if (!u) return null;
   const rows: [string, number][] = [["Pain", u.pain], ["Worsening", u.worsening], ["Transformation", u.transformation], ["Specificity", u.specificity], ["Speed", u.speed]];
   return (
