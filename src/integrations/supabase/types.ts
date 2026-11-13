@@ -19,6 +19,8 @@ export type Database = {
           content: string
           created_at: string
           id: string
+          image_prompt: string | null
+          image_url: string | null
           position: number
           product_id: string
           summary: string | null
@@ -29,6 +31,8 @@ export type Database = {
           content?: string
           created_at?: string
           id?: string
+          image_prompt?: string | null
+          image_url?: string | null
           position?: number
           product_id: string
           summary?: string | null
@@ -39,6 +43,8 @@ export type Database = {
           content?: string
           created_at?: string
           id?: string
+          image_prompt?: string | null
+          image_url?: string | null
           position?: number
           product_id?: string
           summary?: string | null
@@ -60,14 +66,17 @@ export type Database = {
           audience: string | null
           cover_url: string | null
           created_at: string
+          design: Json | null
           id: string
           product_type: string
+          promise: string | null
           sales_kit: Json | null
           status: string
           subtitle: string | null
           title: string
           tone: string | null
           topic: string
+          unlocks: Json | null
           updated_at: string
           user_id: string
         }
@@ -75,14 +84,17 @@ export type Database = {
           audience?: string | null
           cover_url?: string | null
           created_at?: string
+          design?: Json | null
           id?: string
           product_type?: string
+          promise?: string | null
           sales_kit?: Json | null
           status?: string
           subtitle?: string | null
           title?: string
           tone?: string | null
           topic?: string
+          unlocks?: Json | null
           updated_at?: string
           user_id?: string
         }
@@ -90,14 +102,17 @@ export type Database = {
           audience?: string | null
           cover_url?: string | null
           created_at?: string
+          design?: Json | null
           id?: string
           product_type?: string
+          promise?: string | null
           sales_kit?: Json | null
           status?: string
           subtitle?: string | null
           title?: string
           tone?: string | null
           topic?: string
+          unlocks?: Json | null
           updated_at?: string
           user_id?: string
         }

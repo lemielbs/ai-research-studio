@@ -1,0 +1,2 @@
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS promise text, ADD COLUMN IF NOT EXISTS unlocks jsonb, ADD COLUMN IF NOT EXISTS design jsonb;
+ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS image_url text, ADD COLUMN IF NOT EXISTS image_prompt text;
