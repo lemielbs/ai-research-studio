@@ -35,7 +35,82 @@ function parseJson<T>(s: string): T {
 }
 
 const SYS =
-  "You are an expert digital product creator who builds profitable ebooks, workbooks, checklists and mini-courses for niche audiences. Write practical, specific, high-value content.";
+  "You are an expert digital product creator who builds profitable ebooks, workbooks, checklists and mini-courses for niche audiences. You judge every idea by the 5 unlocks: Pain (a real felt problem), Worsening Pain (it gets worse over time), Transformation (clear Point A to Point B), Specificity (a narrow, defined buyer), Speed (fast, believable results). Buyers pay for transformation, not length. Write practical, specific, high-value content.";
+
+const UNLOCKS = `"unlocks":{"pain":1-10,"worsening":1-10,"transformation":1-10,"specificity":1-10,"speed":1-10}`;
+export type Unlocks = { pain: number; worsening: number; transformation: number; specificity: number; speed: number };
+
+export const suggestTopics = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ pillar: z.string().max(40), hint: z.string().max(300) }).parse(d))
+  .handler(async ({ data }) => {
+    const out = await ask(
+      SYS,
+      `Suggest 5 profitable digital product ideas${data.pillar ? ` in the ${data.pillar} pillar` : " across wealth, health, relationships or practical hobbies"}.${data.hint ? ` User interests: ${data.hint}.` : ""} Each must target a very specific person with a painful, worsening problem. Return JSON: {"ideas":[{"topic":"short topic","audience":"very specific person","pain":"the painful problem","worsening":"why it gets worse if ignored",${UNLOCKS}}]}`,
+      true,
+    );
+    return parseJson<{ ideas: { topic: string; audience: string; pain: string; worsening: string; unlocks: Unlocks }[] }>(out);
+  });
+
+export const suggestTitles = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ topic: z.string().max(300), audience: z.string().max(300), current: z.string().max(200) }).parse(d))
+  .handler(async ({ data }) => {
+    const out = await ask(
+      SYS,
+      `Topic: ${data.topic}. Audience: ${data.audience}. Current title: "${data.current}". Write 3 new punchy, outcome-led titles (result + timeframe, max 8 words) with a subtitle naming the specific person and pain. Return JSON: {"titles":[{"title":"...","subtitle":"..."}]}`,
+      true,
+    );
+    return parseJson<{ titles: { title: string; subtitle: string }[] }>(out);
+  });
+
+export const recommendDesign = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ title: z.string().max(200), topic: z.string().max(300), audience: z.string().max(300), tone: z.string().max(40) }).parse(d))
+  .handler(async ({ data }) => {
+    const out = await ask(
+      "You are a book designer.",
+      `Pick the best PDF design style for "${data.title}" (topic ${data.topic}, audience ${data.audience}, tone ${data.tone}). Options: minimal, magazine, warm, corporate, playful. Return JSON: {"theme":"one id","reason":"one sentence"}`,
+      true,
+    );
+    const r = parseJson<{ theme: string; reason: string }>(out);
+    if (!["minimal", "magazine", "warm", "corporate", "playful"].includes(r.theme)) r.theme = "minimal";
+    return r;
+  });
+
+export const planImages = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ title: z.string().max(200), chapters: z.array(z.object({ id: z.string(), title: z.string().max(200), summary: z.string().max(1000) })).max(20) }).parse(d))
+  .handler(async ({ data }) => {
+    const out = await ask(
+      "You are an art director for ebooks.",
+      `Ebook "${data.title}". Chapters:\n${data.chapters.map((c) => `${c.id}: ${c.title} — ${c.summary}`).join("\n")}\n\nChoose the chapters where a picture genuinely helps the reader (usually most, skip purely abstract ones). For each, describe one concrete visual scene (no text in image). Return JSON: {"images":[{"id":"chapter id","prompt":"scene description"}]}`,
+      true,
+    );
+    return parseJson<{ images: { id: string; prompt: string }[] }>(out);
+  });
+
+export const generateSectionImage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ prompt: z.string().max(1000), style: z.string().max(300) }).parse(d))
+  .handler(async ({ data }) => {
+    try {
+      const res = await generateImage({
+        model: "openai/gpt-image-2.5-sunburst",
+        prompt: `${data.prompt}. Style: ${data.style}. No text, no letters, no watermark. Wide landscape composition.`,
+        size: "1536x1024",
+        quality: "low",
+        output_format: "jpeg",
+        output_compression: 60,
+      });
+      const b64 = res.data?.[0]?.b64_json;
+      if (!b64) throw new Error("no image");
+      return { dataUrl: `data:image/jpeg;base64,${b64}` };
+    } catch (e) {
+      console.error("image error", e);
+      throw new Error("Couldn't create that image. Please try again.");
+    }
+  });
 
 export const suggestAngles = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -45,10 +120,10 @@ export const suggestAngles = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const out = await ask(
       SYS,
-      `Topic: ${data.topic}\nAudience: ${data.audience || "general"}\nProduct type: ${data.productType}\n\nSuggest 3 distinct, profitable niche angles. Return JSON: {"angles":[{"title":"...","subtitle":"...","why":"one sentence on why it sells"}]}`,
+      `Topic: ${data.topic}\nAudience: ${data.audience || "general"}\nProduct type: ${data.productType}\n\nSuggest 3 distinct, profitable niche angles. Titles must be punchy and outcome-led (result + timeframe, max 8 words, e.g. "Sleep Through the Night in 7 Nights"), never generic like "The Ultimate Guide to X". Subtitle names the specific person and pain. Promise follows: I help [specific person] who [painful, worsening problem] get [result] in [timeframe]. Return JSON: {"angles":[{"title":"...","subtitle":"...","why":"one sentence on why it sells","promise":"I help ...",${UNLOCKS}}]}`,
       true,
     );
-    return parseJson<{ angles: { title: string; subtitle: string; why: string }[] }>(out);
+    return parseJson<{ angles: { title: string; subtitle: string; why: string; promise: string; unlocks: Unlocks }[] }>(out);
   });
 
 export const generateOutline = createServerFn({ method: "POST" })
@@ -69,7 +144,7 @@ export const generateOutline = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const out = await ask(
       SYS,
-      `Create an outline for a ${data.productType} titled "${data.title}" (${data.subtitle}). Topic: ${data.topic}. Audience: ${data.audience}. Tone: ${data.tone}. Exactly ${data.chapters} chapters/sections. Return JSON: {"chapters":[{"title":"...","summary":"2 sentences on what it covers"}]}`,
+      `Create an outline for a ${data.productType} titled "${data.title}" (${data.subtitle}). Topic: ${data.topic}. Audience: ${data.audience}. Tone: ${data.tone}. Exactly ${data.chapters} chapters/sections, forming a step-by-step journey from Point A (the pain) to Point B (the result). Short, actionable, fast wins first. Return JSON: {"chapters":[{"title":"...","summary":"2 sentences on what it covers"}]}`,
       true,
     );
     return parseJson<{ chapters: { title: string; summary: string }[] }>(out);
@@ -93,7 +168,7 @@ export const writeChapter = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const content = await ask(
       SYS,
-      `Product: "${data.productTitle}" (${data.productType}) for ${data.audience}. Tone: ${data.tone}.\nFull outline:\n${data.outline}\n\nWrite the full section "${data.chapterTitle}" — ${data.summary}\nUse Markdown with ## subheadings, short paragraphs, bullet lists, and concrete examples or action steps. 600-900 words. Do not repeat the chapter title as a heading.`,
+      `Product: "${data.productTitle}" (${data.productType}) for ${data.audience}. Tone: ${data.tone}.\nFull outline:\n${data.outline}\n\nWrite the full section "${data.chapterTitle}" — ${data.summary}\nUse Markdown with ## subheadings, short paragraphs, bullet lists and concrete examples. Include at least one line starting with "> Tip: ", one starting with "> Action: ", and a short checklist using "- [ ] " items. 500-800 words. Do not repeat the chapter title as a heading.`,
     );
     return { content };
   });
