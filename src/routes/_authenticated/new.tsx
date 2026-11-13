@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { suggestAngles, generateOutline } from "@/lib/ai.functions";
+import { suggestAngles, generateOutline, suggestTopics, suggestTitles, recommendDesign, type Unlocks } from "@/lib/ai.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,16 +16,33 @@ export const Route = createFileRoute("/_authenticated/new")({
 
 const TYPES = ["ebook", "workbook", "checklist", "mini-course"];
 const TONES = ["friendly", "professional", "bold", "inspiring"];
-type Angle = { title: string; subtitle: string; why: string };
+type Angle = { title: string; subtitle: string; why: string; promise?: string; unlocks?: Unlocks };
+type Idea = { topic: string; audience: string; pain: string; worsening: string; unlocks: Unlocks };
+const PILLARS = ["", "wealth", "health", "relationships", "hobbies"];
+
+export function UnlockBars({ u }: { u?: Unlocks }) {
+  if (!u) return null;
+  const rows: [string, number][] = [["Pain", u.pain], ["Worsening", u.worsening], ["Transformation", u.transformation], ["Specificity", u.specificity], ["Speed", u.speed]];
+  return (
+    <div className="mt-3 grid grid-cols-5 gap-2">
+      {rows.map(([k, v]) => (
+        <div key={k}>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{k}</div>
+          <div className="mt-1 h-1.5 rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(10, Math.max(0, v)) * 10}%` }} /></div>
+        </div>
+      ))}
+    </div>
+  );
+}
 type OL = { title: string; summary: string };
 
 function Chips({ value, options, onChange }: { value: string; options: string[]; onChange: (v: string) => void }) {
   return (
     <div className="flex flex-wrap gap-2">
       {options.map((o) => (
-        <button key={o} type="button" onClick={() => onChange(o)}
+        <button key={o || "any"} type="button" onClick={() => onChange(o)}
           className={`rounded-full border px-4 py-1.5 text-sm capitalize transition ${value === o ? "border-primary bg-primary text-primary-foreground" : "hover:border-primary"}`}>
-          {o}
+          {o || "any"}
         </button>
       ))}
     </div>
@@ -36,6 +53,12 @@ function NewProduct() {
   const navigate = useNavigate();
   const anglesFn = useServerFn(suggestAngles);
   const outlineFn = useServerFn(generateOutline);
+  const topicsFn = useServerFn(suggestTopics);
+  const titlesFn = useServerFn(suggestTitles);
+  const designFn = useServerFn(recommendDesign);
+  const [pillar, setPillar] = useState("");
+  const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [titleOpts, setTitleOpts] = useState<{ title: string; subtitle: string }[]>([]);
   const [step, setStep] = useState(1);
   const [busy, setBusy] = useState(false);
   const [topic, setTopic] = useState("");
@@ -53,6 +76,17 @@ function NewProduct() {
     return undefined;
   };
 
+  const getIdeas = () => run(async () => {
+    const r = await topicsFn({ data: { pillar, hint: topic } });
+    setIdeas(r.ideas);
+  });
+
+  const getTitles = () => run(async () => {
+    if (!picked) return;
+    const r = await titlesFn({ data: { topic, audience, current: picked.title } });
+    setTitleOpts(r.titles);
+  });
+
   const getAngles = () => run(async () => {
     const r = await anglesFn({ data: { topic, audience, productType: type } });
     setAngles(r.angles); setStep(2);
@@ -66,8 +100,9 @@ function NewProduct() {
 
   const create = () => run(async () => {
     if (!picked) return;
+    const d = await designFn({ data: { title: picked.title, topic, audience, tone } }).catch(() => ({ theme: "minimal", reason: "" }));
     const { data: p, error } = await supabase.from("products").insert({
-      title: picked.title, subtitle: picked.subtitle, topic, audience, product_type: type, tone, status: "outline",
+      title: picked.title, subtitle: picked.subtitle, topic, audience, product_type: type, tone, status: "outline", promise: picked.promise ?? null, unlocks: picked.unlocks ?? null, design: { theme: d.theme, reason: d.reason },
     }).select("id").single();
     if (error) throw error;
     const { error: e2 } = await supabase.from("chapters").insert(
@@ -88,6 +123,26 @@ function NewProduct() {
       {step === 1 && (
         <div className="space-y-6 rounded-2xl border bg-card p-8">
           <h1 className="text-3xl font-bold">What do you want to build?</h1>
+          <div className="rounded-xl border border-dashed p-4">
+            <div className="text-sm font-medium">No idea yet? Let AI suggest one.</div>
+            <div className="mt-3"><Chips value={pillar} options={PILLARS} onChange={setPillar} /></div>
+            <p className="mt-1 text-xs text-muted-foreground">Pick an area (the first chip means "any")</p>
+            <Button className="mt-3" size="sm" variant="outline" disabled={busy} onClick={getIdeas}>{busy ? "Thinking…" : "Suggest ideas for me"}</Button>
+            {ideas.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {ideas.map((it) => (
+                  <button key={it.topic} type="button" onClick={() => { setTopic(it.topic); setAudience(it.audience); setIdeas([]); }}
+                    className="block w-full rounded-lg border bg-background p-3 text-left text-sm transition hover:border-primary">
+                    <div className="font-semibold">{it.topic}</div>
+                    <div className="text-muted-foreground">For {it.audience}</div>
+                    <div className="mt-1">Pain: {it.pain}</div>
+                    <div className="text-muted-foreground">Gets worse: {it.worsening}</div>
+                    <UnlockBars u={it.unlocks} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="space-y-2"><Label>Topic</Label><Input placeholder="e.g. meal prep for busy nurses" value={topic} onChange={(e) => setTopic(e.target.value)} /></div>
           <div className="space-y-2"><Label>Who is it for?</Label><Input placeholder="e.g. shift-working healthcare workers" value={audience} onChange={(e) => setAudience(e.target.value)} /></div>
           <div className="space-y-2"><Label>Product type</Label><Chips value={type} options={TYPES} onChange={setType} /></div>
@@ -106,7 +161,9 @@ function NewProduct() {
             <button key={a.title} disabled={busy} onClick={() => getOutline(a)} className="block w-full rounded-2xl border bg-card p-6 text-left transition hover:border-primary disabled:opacity-50">
               <h3 className="text-xl font-semibold">{a.title}</h3>
               <p className="mt-1 text-muted-foreground">{a.subtitle}</p>
+              {a.promise && <p className="mt-3 text-sm italic">"{a.promise}"</p>}
               <p className="mt-3 text-sm text-primary">↗ {a.why}</p>
+              <UnlockBars u={a.unlocks} />
             </button>
           ))}
           {busy && <p className="text-muted-foreground">Building your outline…</p>}
@@ -117,6 +174,18 @@ function NewProduct() {
       {step === 3 && (
         <div className="space-y-4">
           <h1 className="text-3xl font-bold">{picked?.title}</h1>
+          <p className="text-muted-foreground">{picked?.subtitle}</p>
+          <Button size="sm" variant="outline" disabled={busy} onClick={getTitles}>{busy ? "…" : "Rewrite title"}</Button>
+          {titleOpts.length > 0 && (
+            <div className="space-y-2">
+              {titleOpts.map((o) => (
+                <button key={o.title} type="button" onClick={() => { setPicked(picked ? { ...picked, ...o } : picked); setTitleOpts([]); }}
+                  className="block w-full rounded-lg border bg-card p-3 text-left hover:border-primary">
+                  <div className="font-semibold">{o.title}</div><div className="text-sm text-muted-foreground">{o.subtitle}</div>
+                </button>
+              ))}
+            </div>
+          )}
           <p className="text-muted-foreground">Edit the outline, then let AI write every chapter.</p>
           {outline.map((c, i) => (
             <div key={i} className="space-y-2 rounded-xl border bg-card p-4">
