@@ -1,32 +1,48 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { generateChatCompletion, generateImage, GatewayError } from "@lovable.dev/ai-gateway";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-const MODEL = "openai/gpt-6-astra" as const;
+const MODEL = "gpt-4o-mini";
 
-async function ask(system: string, user: string, json = false): Promise<string> {
-  try {
-    const res = await generateChatCompletion({
-      model: MODEL,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      ...(json ? { response_format: { type: "json_object" as const } } : {}),
-    });
-    const content = res.choices?.[0]?.message?.content;
-    if (typeof content !== "string" || !content) throw new Error("Empty AI response");
-    return content;
-  } catch (e) {
-    console.error("AI error", e);
-    if (e instanceof GatewayError) {
-      if (e.code === "payment_required" || e.httpStatus === 402)
-        throw new Error("AI credits are used up. Please add credits and try again.");
-      if (e.httpStatus === 429) throw new Error("Too many requests right now. Please wait a moment.");
-    }
+function keyOrThrow(): string {
+  const k = process.env["OPENAI_API_KEY"];
+  if (!k) throw new Error("Add your OpenAI key to use AI features.");
+  return k;
+}
+
+async function openai(path: string, body: unknown): Promise<any> {
+  const res = await fetch(`https://api.openai.com/v1/${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${keyOrThrow()}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    console.error("OpenAI error", res.status, t);
+    if (res.status === 401) throw new Error("Your OpenAI key is invalid. Please update it.");
+    if (res.status === 429 || t.includes("insufficient_quota"))
+      throw new Error("OpenAI balance used up or rate limited. Check your OpenAI billing or wait a moment.");
     throw new Error("The AI couldn't finish that. Please try again.");
   }
+  return res.json();
+}
+
+async function generateImage(opts: { prompt: string; size: string }) {
+  return openai("images/generations", { model: "gpt-image-1", prompt: opts.prompt, size: opts.size, quality: "low", n: 1 });
+}
+
+async function ask(system: string, user: string, json = false): Promise<string> {
+  const res = await openai("chat/completions", {
+    model: MODEL,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    ...(json ? { response_format: { type: "json_object" } } : {}),
+  });
+  const content = res.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || !content) throw new Error("The AI couldn't finish that. Please try again.");
+  return content;
 }
 
 function parseJson<T>(s: string): T {
@@ -96,19 +112,15 @@ export const generateSectionImage = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     try {
       const res = await generateImage({
-        model: "openai/gpt-image-2.5-sunburst",
-        prompt: `${data.prompt}. Style: ${data.style}. No text, no letters, no watermark. Wide landscape composition.`,
+                prompt: `${data.prompt}. Style: ${data.style}. No text, no letters, no watermark. Wide landscape composition.`,
         size: "1536x1024",
-        quality: "low",
-        output_format: "jpeg",
-        output_compression: 60,
       });
       const b64 = res.data?.[0]?.b64_json;
       if (!b64) throw new Error("no image");
-      return { dataUrl: `data:image/jpeg;base64,${b64}` };
+      return { dataUrl: `data:image/png;base64,${b64}` };
     } catch (e) {
       console.error("image error", e);
-      throw new Error("Couldn't create that image. Please try again.");
+      throw e instanceof Error && e.message.includes("OpenAI") ? e : new Error("Couldn't create that image. Please try again.");
     }
   });
 
@@ -200,16 +212,12 @@ export const generateCover = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     try {
       const res = await generateImage({
-        model: "openai/gpt-image-2.5-sunburst",
-        prompt: `Premium minimalist ebook cover artwork, no text, no letters. Theme: ${data.topic}. Bold editorial composition, rich colors, high-end design, vertical book cover.`,
+                prompt: `Premium minimalist ebook cover artwork, no text, no letters. Theme: ${data.topic}. Bold editorial composition, rich colors, high-end design, vertical book cover.`,
         size: "1024x1536",
-        quality: "low",
-        output_format: "jpeg",
-        output_compression: 70,
       });
       const b64 = res.data?.[0]?.b64_json;
       if (!b64) throw new Error("no image");
-      return { dataUrl: `data:image/jpeg;base64,${b64}` };
+      return { dataUrl: `data:image/png;base64,${b64}` };
     } catch (e) {
       console.error("cover error", e);
       throw new Error("Couldn't create the cover. Please try again.");
