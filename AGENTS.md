@@ -31,3 +31,4 @@ use the editor.
 
 - AI calls live in src/lib/ai.functions.ts as auth-protected server functions; why: keeps prompts and the AI key on the server.
 - Product covers are stored as image data in products.cover_url; why: avoids a storage bucket for one image per product.
+- AI calls go directly to OpenAI with the user's OPENAI_API_KEY secret; why: the user chose to pay with their own key instead of Lovable AI credits.
