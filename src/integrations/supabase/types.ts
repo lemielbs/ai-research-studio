@@ -61,6 +61,57 @@ export type Database = {
           },
         ]
       }
+      creators: {
+        Row: {
+          analysis: Json | null
+          avg_reel_views: number | null
+          content: string | null
+          created_at: string
+          email: string | null
+          followers: number | null
+          handle: string
+          id: string
+          niche: string | null
+          offer: string | null
+          product_id: string | null
+          sells_product: boolean
+          top_video_views: number | null
+          user_id: string
+        }
+        Insert: {
+          analysis?: Json | null
+          avg_reel_views?: number | null
+          content?: string | null
+          created_at?: string
+          email?: string | null
+          followers?: number | null
+          handle: string
+          id?: string
+          niche?: string | null
+          offer?: string | null
+          product_id?: string | null
+          sells_product?: boolean
+          top_video_views?: number | null
+          user_id: string
+        }
+        Update: {
+          analysis?: Json | null
+          avg_reel_views?: number | null
+          content?: string | null
+          created_at?: string
+          email?: string | null
+          followers?: number | null
+          handle?: string
+          id?: string
+          niche?: string | null
+          offer?: string | null
+          product_id?: string | null
+          sells_product?: boolean
+          top_video_views?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       products: {
         Row: {
           audience: string | null
@@ -113,6 +164,24 @@ export type Database = {
           tone?: string | null
           topic?: string
           unlocks?: Json | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_ai_keys: {
+        Row: {
+          openai_key: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          openai_key: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          openai_key?: string
           updated_at?: string
           user_id?: string
         }
