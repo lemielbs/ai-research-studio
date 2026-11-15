@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/Logo";
+import { KeyBanner } from "@/components/KeyBanner";
 
 export function AppHeader() {
   const qc = useQueryClient();
@@ -19,10 +20,13 @@ export function AppHeader() {
         <Link to="/dashboard"><Logo /></Link>
         <div className="flex items-center gap-2">
           <Button asChild variant="ghost" size="sm"><Link to="/dashboard">My products</Link></Button>
+          <Button asChild variant="ghost" size="sm"><Link to="/creators">Creators</Link></Button>
+          <Button asChild variant="ghost" size="sm"><Link to="/settings">Settings</Link></Button>
           <Button asChild size="sm"><Link to="/new">+ New product</Link></Button>
           <Button variant="outline" size="sm" onClick={signOut}>Sign out</Button>
         </div>
       </div>
+      <KeyBanner />
     </header>
   );
 }
