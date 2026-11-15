@@ -47,7 +47,7 @@ async function generateImage(ctx: Ctx, opts: { prompt: string; size: "1536x1024"
   const p = await provider(ctx);
   if (p.owner) {
     try {
-      return await gwImage({ model: "openai/gpt-image-2.5-sunburst", prompt: opts.prompt, size: opts.size, quality: "low", output_format: "png" } as any);
+      return await gwImage({ model: "openai/gpt-image-2.5-sunburst", prompt: opts.prompt, size: opts.size, quality: "low", output_format: "png" });
     } catch (e) {
       if (!isOutOfCredits(e)) console.error("gateway image error", e);
     }
@@ -254,4 +254,51 @@ export const generateCover = createServerFn({ method: "POST" })
       if (e instanceof Error && (e.message.startsWith("NEED_KEY") || e.message.includes("OpenAI"))) throw e;
       throw new Error("Couldn't create the cover. Please try again.");
     }
+  });
+
+export const getAiStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const owner = String(context.claims?.email ?? "").toLowerCase() === OWNER_EMAIL;
+    if (owner) return { owner: true, hasKey: true };
+    const { data } = await context.supabase.from("user_ai_keys").select("user_id").eq("user_id", context.userId).maybeSingle();
+    return { owner: false, hasKey: !!data };
+  });
+
+export const saveMyKey = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ key: z.string().trim().min(20).max(300) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const test = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${data.key}` } });
+    if (!test.ok) throw new Error("That OpenAI key didn't work. Please check it and try again.");
+    const { error } = await context.supabase.from("user_ai_keys").upsert({ user_id: context.userId, openai_key: data.key, updated_at: new Date().toISOString() });
+    if (error) throw new Error("Couldn't save your key.");
+    return { ok: true };
+  });
+
+export const removeMyKey = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await context.supabase.from("user_ai_keys").delete().eq("user_id", context.userId);
+    return { ok: true };
+  });
+
+export type CreatorAnalysis = {
+  niche: string; audience: string; tone: string; pains: string[]; themes: string[];
+  ebook: { title: string; subtitle: string; promise: string; product_type: string; chapters: string[] };
+  price: string;
+};
+
+export const analyzeCreator = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ handle: z.string().max(100), niche: z.string().max(200), followers: z.number().nullable(), content: z.string().min(30).max(15000), myName: z.string().max(100) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const out = await ask(context, SYS,
+      `Analyse this Instagram creator @${data.handle} (${data.niche || "niche unknown"}, ${data.followers ?? "?"} followers). Their bio, captions and video topics:\n"""${data.content}"""\n\nWork out their niche, exact audience, voice/tone, the audience's painful worsening problems, and recurring themes. Then design ONE personalised ebook in the creator's own voice that their audience would buy (outcome-led title with timeframe, subtitle, one-sentence promise, product type ebook/workbook/checklist/mini-course, 5-7 chapter titles as a Point A to Point B journey), plus a suggested price. Return JSON: {"niche":"","audience":"","tone":"","pains":[""],"themes":[""],"ebook":{"title":"","subtitle":"","promise":"","product_type":"ebook","chapters":[""]},"price":"$27"}`,
+      true);
+    const analysis = parseJson<CreatorAnalysis>(out);
+    const offer = await ask(context,
+      "You write short, warm, specific partnership pitches to micro-creators. No hype, no emojis spam, no generic lines like 'want to work together'. Plain text only.",
+      `Write a ready-to-send email to @${data.handle} from ${data.myName || "[Your name]"}. Include: a subject line on the first line as "Subject: ...", a specific compliment referencing their content (${analysis.themes.slice(0, 3).join(", ")}), the observation that their audience (${analysis.audience}) struggles with ${analysis.pains[0]}, the personalised product idea "${analysis.ebook.title}" — ${analysis.ebook.promise}, that I build the whole product with their voice and branding at no cost to them, it's sold and delivered automatically with revenue split paid straight to both of us, and a simple low-pressure call to action (reply "yes" and I'll send a free preview). Under 170 words.`);
+    return { analysis, offer };
   });
