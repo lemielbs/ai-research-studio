@@ -17,7 +17,7 @@ async function provider(ctx: Ctx): Promise<Provider> {
   const email = String(ctx.claims?.email ?? "").toLowerCase();
   if (email === OWNER_EMAIL) return { owner: true, key: process.env["OPENAI_API_KEY"] };
   const { data } = await ctx.supabase.from("user_ai_keys").select("openai_key").eq("user_id", ctx.userId).maybeSingle();
-  if (!data?.openai_key) throw new Error("NEED_KEY: Add your own OpenAI API key in Settings to start.");
+  if (!data?.openai_key) throw new Error("Add your own OpenAI API key in Settings to start.");
   return { owner: false, key: data.openai_key };
 }
 
@@ -35,7 +35,7 @@ async function openai(key: string | undefined, path: string, body: unknown): Pro
   if (!res.ok) {
     const t = await res.text();
     console.error("OpenAI error", res.status, t);
-    if (res.status === 401) throw new Error("NEED_KEY: Your OpenAI key is invalid. Please update it in Settings.");
+    if (res.status === 401) throw new Error("Your OpenAI key is invalid. Please update it in Settings.");
     if (res.status === 429 || t.includes("insufficient_quota"))
       throw new Error("OpenAI balance used up or rate limited. Check your OpenAI billing or wait a moment.");
     throw new Error("The AI couldn't finish that. Please try again.");
@@ -151,7 +151,7 @@ export const generateSectionImage = createServerFn({ method: "POST" })
       return { dataUrl: `data:image/png;base64,${b64}` };
     } catch (e) {
       console.error("image error", e);
-      throw e instanceof Error && (e.message.includes("OpenAI") || e.message.startsWith("NEED_KEY")) ? e : new Error("Couldn't create that image. Please try again.");
+      throw e instanceof Error && (e.message.includes("OpenAI") || e.message.includes("Settings")) ? e : new Error("Couldn't create that image. Please try again.");
     }
   });
 
@@ -251,7 +251,7 @@ export const generateCover = createServerFn({ method: "POST" })
       return { dataUrl: `data:image/png;base64,${b64}` };
     } catch (e) {
       console.error("cover error", e);
-      if (e instanceof Error && (e.message.startsWith("NEED_KEY") || e.message.includes("OpenAI"))) throw e;
+      if (e instanceof Error && (e.message.includes("Settings") || e.message.includes("OpenAI"))) throw e;
       throw new Error("Couldn't create the cover. Please try again.");
     }
   });
