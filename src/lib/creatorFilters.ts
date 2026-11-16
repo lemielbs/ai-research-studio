@@ -9,7 +9,7 @@ export function parseCount(v: string): number | null {
   if (!t) return null;
   const m = t.match(/^(\d+(?:\.\d+)?)([km])?/);
   if (!m) return null;
-  const n = parseFloat(m[1]) * (m[2] === "k" ? 1e3 : m[2] === "m" ? 1e6 : 1);
+  const n = parseFloat(m[1] ?? "0") * (m[2] === "k" ? 1e3 : m[2] === "m" ? 1e6 : 1);
   return Math.round(n);
 }
 
@@ -31,7 +31,7 @@ export function runFilters(c: CreatorStats): Check[] {
 export function typicalReelViews(views: number[]): number | null {
   const a = views.filter((n) => n > 0).sort((x, y) => x - y);
   if (!a.length) return null;
-  return a[Math.floor((a.length - 1) / 2)];
+  return a[Math.floor((a.length - 1) / 2)] ?? null;
 }
 
 export const passesAll = (c: CreatorStats) => runFilters(c).every((x) => x.pass === true);
