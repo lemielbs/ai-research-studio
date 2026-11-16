@@ -15,8 +15,8 @@ type Provider = { owner: true; key: string | undefined } | { owner: false; key: 
 
 async function provider(ctx: Ctx): Promise<Provider> {
   const email = String(ctx.claims?.email ?? "").toLowerCase();
-  if (email === OWNER_EMAIL) return { owner: true, key: process.env["OPENAI_API_KEY"] };
   const { data } = await ctx.supabase.from("user_ai_keys").select("openai_key").eq("user_id", ctx.userId).maybeSingle();
+  if (email === OWNER_EMAIL) return { owner: true, key: data?.openai_key || process.env["OPENAI_API_KEY"] };
   if (!data?.openai_key) throw new Error("Add your own OpenAI API key in Settings to start.");
   return { owner: false, key: data.openai_key };
 }
@@ -38,7 +38,9 @@ async function openai(key: string | undefined, path: string, body: unknown): Pro
     if (res.status === 401) throw new Error("Your OpenAI key is invalid. Please update it in Settings.");
     if (res.status === 429 || t.includes("insufficient_quota"))
       throw new Error("OpenAI balance used up or rate limited. Check your OpenAI billing or wait a moment.");
-    throw new Error("The AI couldn't finish that. Please try again.");
+    let msg = "";
+    try { msg = JSON.parse(t)?.error?.message ?? ""; } catch {}
+    throw new Error(msg ? `OpenAI: ${msg.slice(0, 200)}` : "The AI couldn't finish that. Please try again.");
   }
   return res.json();
 }
@@ -52,7 +54,14 @@ async function generateImage(ctx: Ctx, opts: { prompt: string; size: "1536x1024"
       if (!isOutOfCredits(e)) console.error("gateway image error", e);
     }
   }
-  return openai(p.key, "images/generations", { model: "gpt-image-1", prompt: opts.prompt, size: opts.size, quality: "low", n: 1 });
+  try {
+    return await openai(p.key, "images/generations", { model: "gpt-image-1", prompt: opts.prompt, size: opts.size, quality: "low", n: 1 });
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("invalid")) throw e;
+    console.error("gpt-image-1 failed, trying dall-e-3", e);
+    const r = await openai(p.key, "images/generations", { model: "dall-e-3", prompt: opts.prompt.slice(0, 3900), size: opts.size === "1024x1536" ? "1024x1792" : "1792x1024", response_format: "b64_json", n: 1 });
+    return r;
+  }
 }
 
 async function ask(ctx: Ctx, system: string, user: string, json = false): Promise<string> {
@@ -260,9 +269,8 @@ export const getAiStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const owner = String(context.claims?.email ?? "").toLowerCase() === OWNER_EMAIL;
-    if (owner) return { owner: true, hasKey: true };
     const { data } = await context.supabase.from("user_ai_keys").select("user_id").eq("user_id", context.userId).maybeSingle();
-    return { owner: false, hasKey: !!data };
+    return { owner, hasKey: !!data };
   });
 
 export const saveMyKey = createServerFn({ method: "POST" })
@@ -301,4 +309,22 @@ export const analyzeCreator = createServerFn({ method: "POST" })
       "You write short, warm, specific partnership pitches to micro-creators. No hype, no emojis spam, no generic lines like 'want to work together'. Plain text only.",
       `Write a ready-to-send email to @${data.handle} from ${data.myName || "[Your name]"}. Include: a subject line on the first line as "Subject: ...", a specific compliment referencing their content (${analysis.themes.slice(0, 3).join(", ")}), the observation that their audience (${analysis.audience}) struggles with ${analysis.pains[0]}, the personalised product idea "${analysis.ebook.title}" — ${analysis.ebook.promise}, that I build the whole product with their voice and branding at no cost to them, it's sold and delivered automatically with revenue split paid straight to both of us, and a simple low-pressure call to action (reply "yes" and I'll send a free preview). Under 170 words.`);
     return { analysis, offer };
+  });
+
+export const extractCreatorStats = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ text: z.string().min(10).max(15000) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const out = await ask(context, "You extract Instagram profile facts from pasted text. Never invent numbers: use null when not stated. Convert 45.2K to 45200 and 1.2M to 1200000.",
+      `Pasted profile/Reels text:\n"""${data.text}"""\nReturn JSON: {"handle":"without @ or null","niche":"short or null","followers":number|null,"top_video_views":number|null (highest Reel view count shown),"reel_views":[numbers of the most recent Reels views, up to 10],"email":"business email or null","sells_product":true if bio/links show their own course, ebook, coaching, shop or paid community}`, true);
+    return parseJson<{ handle: string | null; niche: string | null; followers: number | null; top_video_views: number | null; reel_views: number[]; email: string | null; sells_product: boolean }>(out);
+  });
+
+export const suggestCreatorSearches = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ niche: z.string().min(2).max(200) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const out = await ask(context, SYS,
+      `Niche: ${data.niche}. Give 8 Instagram search phrases (industry + keyword creators in this niche use in content, e.g. "parenting tips") that surface micro-creators (10k-100k followers, 50k-200k view Reels) who are unlikely to already sell a product, plus 5 hashtags. Return JSON: {"searches":[{"phrase":"","why":"short"}],"hashtags":["#..."]}`, true);
+    return parseJson<{ searches: { phrase: string; why: string }[]; hashtags: string[] }>(out);
   });
