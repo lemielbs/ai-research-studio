@@ -11,7 +11,7 @@ const GW_MODEL = "openai/gpt-6-astra" as const;
 export const OWNER_EMAIL = "reyeslanzjomaribs@gmail.com";
 
 type Ctx = { supabase: any; userId: string; claims: any };
-type Provider = { owner: true; key?: string } | { owner: false; key: string };
+type Provider = { owner: true; key: string | undefined } | { owner: false; key: string };
 
 async function provider(ctx: Ctx): Promise<Provider> {
   const email = String(ctx.claims?.email ?? "").toLowerCase();

@@ -38,18 +38,18 @@ function Creators() {
 
   const add = async () => {
     const handle = f.handle.replace(/^@/, "").replace(/.*instagram\.com\//, "").replace(/\/.*$/, "").trim();
-    if (!handle) return toast.error("Add their Instagram handle");
+    if (!handle) { toast.error("Add their Instagram handle"); return; }
     const { data: u } = await supabase.auth.getUser();
     const { error } = await supabase.from("creators").insert({
       user_id: u.user!.id, handle, niche: f.niche || null, followers: num(f.followers), top_video_views: num(f.top), avg_reel_views: num(f.avg),
       email: f.email.trim() || null, sells_product: f.sells, content: f.content || null,
     });
-    if (error) return toast.error(error.message);
+    if (error) { toast.error(error.message); return; }
     setF(empty); qc.invalidateQueries({ queryKey: ["creators"] });
   };
 
   const analyze = async (c: NonNullable<typeof list>[number]) => {
-    if (!c.content || c.content.length < 30) return toast.error("Paste their bio and a few captions/video topics first");
+    if (!c.content || c.content.length < 30) { toast.error("Paste their bio and a few captions/video topics first"); return; }
     setBusy(c.id);
     try {
       const r = await analyzeFn({ data: { handle: c.handle, niche: c.niche ?? "", followers: c.followers, content: c.content, myName } });
