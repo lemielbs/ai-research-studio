@@ -7,15 +7,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { analyzeCreator, type CreatorAnalysis } from "@/lib/ai.functions";
-import { runFilters, passesAll } from "@/lib/creatorFilters";
+import { analyzeCreator, extractCreatorStats, suggestCreatorSearches, type CreatorAnalysis } from "@/lib/ai.functions";
+import { runFilters, passesAll, parseCount, typicalReelViews } from "@/lib/creatorFilters";
 
 export const Route = createFileRoute("/_authenticated/creators")({
   head: () => ({ meta: [{ title: "Creator partners — Synthforge" }] }),
   component: Creators,
 });
 
-const num = (v: string) => (v.trim() ? Math.round(Number(v.replace(/[^\d.]/g, "")) * (/k$/i.test(v.trim()) ? 1000 : 1)) : null);
+const num = parseCount;
 const empty = { handle: "", niche: "", followers: "", top: "", avg: "", email: "", sells: false, content: "" };
 
 function Creators() {
@@ -26,6 +26,35 @@ function Creators() {
   const [f, setF] = useState(empty);
   const [busy, setBusy] = useState<string | null>(null);
   const [myName, setMyName] = useState("");
+  const extractFn = useServerFn(extractCreatorStats);
+  const searchFn = useServerFn(suggestCreatorSearches);
+  const [ideas, setIdeas] = useState<{ searches: { phrase: string; why: string }[]; hashtags: string[] } | null>(null);
+  const [auto, setAuto] = useState(false);
+
+  const findIdeas = async () => {
+    setBusy("search");
+    try { setIdeas(await searchFn({ data: { niche: kw } })); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't suggest searches"); }
+    finally { setBusy(null); }
+  };
+
+  const autoFill = async () => {
+    if (f.content.trim().length < 10) { toast.error("Paste their profile and Reels text first"); return; }
+    setAuto(true);
+    try {
+      const r = await extractFn({ data: { text: f.content } });
+      const avg = typicalReelViews(r.reel_views ?? []);
+      setF((o) => ({
+        ...o,
+        handle: o.handle || r.handle || "", niche: o.niche || r.niche || "", email: o.email || r.email || "",
+        followers: r.followers != null ? String(r.followers) : o.followers,
+        top: r.top_video_views != null ? String(r.top_video_views) : o.top,
+        avg: avg != null ? String(avg) : o.avg, sells: r.sells_product ?? o.sells,
+      }));
+      toast.success("Details filled in — check them, then add the creator");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't read that"); }
+    finally { setAuto(false); }
+  };
 
   const { data: list } = useQuery({
     queryKey: ["creators"],
@@ -40,12 +69,13 @@ function Creators() {
     const handle = f.handle.replace(/^@/, "").replace(/.*instagram\.com\//, "").replace(/\/.*$/, "").trim();
     if (!handle) { toast.error("Add their Instagram handle"); return; }
     const { data: u } = await supabase.auth.getUser();
-    const { error } = await supabase.from("creators").insert({
+    const { data: row, error } = await supabase.from("creators").insert({
       user_id: u.user!.id, handle, niche: f.niche || null, followers: num(f.followers), top_video_views: num(f.top), avg_reel_views: num(f.avg),
       email: f.email.trim() || null, sells_product: f.sells, content: f.content || null,
-    });
+    }).select("*").single();
     if (error) { toast.error(error.message); return; }
     setF(empty); qc.invalidateQueries({ queryKey: ["creators"] });
+    if (row.content && row.content.length >= 30) analyze(row);
   };
 
   const analyze = async (c: NonNullable<typeof list>[number]) => {
@@ -89,23 +119,38 @@ function Creators() {
         <div className="mt-3 flex flex-wrap gap-2">
           <Input className="max-w-sm" placeholder="parenting tips" value={kw} onChange={(e) => setKw(e.target.value)} />
           <Button asChild variant="outline" disabled={!kw}><a href={`https://www.instagram.com/explore/search/keyword/?q=${q}`} target="_blank" rel="noreferrer">Search Instagram</a></Button>
+          <Button disabled={!kw || busy === "search"} onClick={findIdeas}>{busy === "search" ? "Thinking…" : "AI: where to search"}</Button>
           <Button asChild variant="outline" disabled={!kw}><a href={`https://www.google.com/search?q=${encodeURIComponent(`site:instagram.com "${kw}" "@gmail.com" OR "business inquiries"`)}`} target="_blank" rel="noreferrer">Find ones with emails</a></Button>
         </div>
+        {ideas && (
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {ideas.searches.map((s) => (
+              <a key={s.phrase} href={`https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(s.phrase)}`} target="_blank" rel="noreferrer" className="rounded-xl border p-3 text-sm hover:border-primary">
+                <b>{s.phrase} ↗</b><div className="text-muted-foreground">{s.why}</div>
+              </a>
+            ))}
+            <div className="text-sm sm:col-span-2">{ideas.hashtags.map((h) => <a key={h} className="mr-3 text-primary underline" target="_blank" rel="noreferrer" href={`https://www.instagram.com/explore/tags/${h.replace(/^#/, "")}/`}>{h}</a>)}</div>
+          </div>
+        )}
       </section>
 
       <section className="mt-6 rounded-2xl border bg-card p-6">
         <h2 className="text-lg font-semibold">2. Add a creator</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Open their profile, select all (Ctrl+A), copy, and paste it below with their Reels tab. Click "Fill in from pasted text" and the AI reads followers, views, email and whether they sell something. Adding them runs the analysis and offer automatically.</p>
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <Input placeholder="@handle or profile link" value={f.handle} onChange={(e) => setF({ ...f, handle: e.target.value })} />
           <Input placeholder="Niche (e.g. toddler sleep)" value={f.niche} onChange={(e) => setF({ ...f, niche: e.target.value })} />
           <Input placeholder="Business email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
           <Input placeholder="Followers (e.g. 45k)" value={f.followers} onChange={(e) => setF({ ...f, followers: e.target.value })} />
           <Input placeholder="Views on the video you found" value={f.top} onChange={(e) => setF({ ...f, top: e.target.value })} />
-          <Input placeholder="Avg views, last 10 Reels" value={f.avg} onChange={(e) => setF({ ...f, avg: e.target.value })} />
+          <Input placeholder="Typical views, last 10 Reels" value={f.avg} onChange={(e) => setF({ ...f, avg: e.target.value })} />
         </div>
         <label className="mt-3 flex items-center gap-2 text-sm"><input type="checkbox" checked={f.sells} onChange={(e) => setF({ ...f, sells: e.target.checked })} /> Already sells their own course/ebook/coaching</label>
         <Textarea className="mt-3" rows={5} placeholder="Paste their bio, recent captions and video topics — the AI uses this to learn their voice." value={f.content} onChange={(e) => setF({ ...f, content: e.target.value })} />
-        <Button className="mt-3" onClick={add}>Add creator</Button>
+        <div className="mt-3 flex gap-2">
+          <Button variant="outline" disabled={auto} onClick={autoFill}>{auto ? "Reading…" : "Fill in from pasted text"}</Button>
+          <Button onClick={add}>Add creator</Button>
+        </div>
       </section>
 
       <div className="mt-6 flex items-center gap-2">
@@ -130,7 +175,7 @@ function Creators() {
                 </div>
               </div>
               <ul className="mt-3 grid gap-1 text-sm sm:grid-cols-2">
-                {checks.map((x) => <li key={x.label} className={x.pass ? "" : "text-muted-foreground line-through"}>{x.pass ? "✓" : "✗"} {x.label}</li>)}
+                {checks.map((x) => <li key={x.label} className={x.pass === false ? "text-destructive" : x.pass == null ? "text-muted-foreground" : ""}>{x.pass ? "✓" : x.pass === false ? "✗" : "?"} {x.label} <span className="text-muted-foreground">— {x.detail}</span></li>)}
               </ul>
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button size="sm" disabled={busy === c.id} onClick={() => analyze(c)}>{busy === c.id ? "Working…" : a ? "Re-analyse & rewrite offer" : "Analyse content & write offer"}</Button>

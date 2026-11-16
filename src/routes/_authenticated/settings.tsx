@@ -33,11 +33,9 @@ function Settings() {
       <h1 className="text-4xl font-bold">Settings</h1>
       <section className="mt-8 rounded-2xl border bg-card p-6">
         <h2 className="text-xl font-semibold">Your AI key</h2>
-        {data?.owner ? (
-          <p className="mt-2 text-muted-foreground">You're the owner. Your account uses Lovable AI credits first, then your own OpenAI key when credits run out.</p>
-        ) : (
+        {(
           <>
-            <p className="mt-2 text-muted-foreground">Every teammate uses their own OpenAI key. Get one at platform.openai.com/api-keys (needs a funded balance). Only you can see it.</p>
+            <p className="mt-2 text-muted-foreground">{data?.owner ? "You're the owner: Lovable AI credits are used first, then the OpenAI key you save here." : "Every teammate uses their own OpenAI key."} Get one at platform.openai.com/api-keys (needs a funded balance). Only you can see it.</p>
             <p className="mt-4 text-sm">{data?.hasKey ? "✓ Key saved" : "No key saved yet"}</p>
             <div className="mt-3 flex gap-2">
               <Input type="password" placeholder="sk-..." value={key} onChange={(e) => setKey(e.target.value)} />
