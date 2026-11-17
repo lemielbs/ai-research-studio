@@ -242,14 +242,16 @@ export const generateSalesKit = createServerFn({ method: "POST" })
       `Product: "${data.title}" — ${data.subtitle}. Audience: ${data.audience}. Outline:\n${data.outline}\n\nReturn JSON: {"headline":"...","salesPage":"Markdown sales page 300-450 words with benefits and a call to action","description":"60-word marketplace description","price":"suggested price like $17","priceReason":"one sentence","socialPosts":["5 short social media posts"]}`,
       true,
     );
-    return parseJson<{
-      headline: string;
-      salesPage: string;
-      description: string;
-      price: string;
-      priceReason: string;
-      socialPosts: string[];
-    }>(out);
+    const r = parseJson<Record<string, unknown>>(out);
+    const str = (v: unknown) => (typeof v === "string" ? v : "");
+    return {
+      headline: str(r.headline) || data.title,
+      salesPage: str(r.salesPage),
+      description: str(r.description),
+      price: str(r.price) || "$17",
+      priceReason: str(r.priceReason),
+      socialPosts: Array.isArray(r.socialPosts) ? r.socialPosts.filter((x): x is string => typeof x === "string") : [],
+    };
   });
 
 export const generateCover = createServerFn({ method: "POST" })
