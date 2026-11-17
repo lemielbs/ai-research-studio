@@ -45,6 +45,8 @@ async function openai(key: string | undefined, path: string, body: unknown): Pro
   return res.json();
 }
 
+const OPENAI_IMAGE_MODELS = ["gpt-image-2.5-flare", "gpt-image-2", "gpt-image-1.5", "gpt-image-1-mini"];
+
 async function generateImage(ctx: Ctx, opts: { prompt: string; size: "1536x1024" | "1024x1536" }) {
   const p = await provider(ctx);
   if (p.owner) {
@@ -54,14 +56,18 @@ async function generateImage(ctx: Ctx, opts: { prompt: string; size: "1536x1024"
       if (!isOutOfCredits(e)) console.error("gateway image error", e);
     }
   }
-  try {
-    return await openai(p.key, "images/generations", { model: "gpt-image-1", prompt: opts.prompt, size: opts.size, quality: "low", n: 1 });
-  } catch (e) {
-    if (e instanceof Error && e.message.includes("invalid")) throw e;
-    console.error("gpt-image-1 failed, trying dall-e-3", e);
-    const r = await openai(p.key, "images/generations", { model: "dall-e-3", prompt: opts.prompt.slice(0, 3900), size: opts.size === "1024x1536" ? "1024x1792" : "1792x1024", response_format: "b64_json", n: 1 });
-    return r;
+  // Models confirmed on the user's OpenAI key; tried in order until one works.
+  let last: unknown;
+  for (const model of OPENAI_IMAGE_MODELS) {
+    try {
+      return await openai(p.key, "images/generations", { model, prompt: opts.prompt, size: opts.size, quality: "low", output_format: "png", n: 1 });
+    } catch (e) {
+      if (e instanceof Error && (e.message.includes("invalid") || e.message.includes("balance"))) throw e;
+      console.error(`${model} failed, trying next`, e);
+      last = e;
+    }
   }
+  throw last instanceof Error ? last : new Error("Couldn't create the picture. Please try again.");
 }
 
 async function ask(ctx: Ctx, system: string, user: string, json = false): Promise<string> {
