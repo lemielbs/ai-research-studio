@@ -254,7 +254,7 @@ function ProductPage() {
                 <div className="rounded-2xl border bg-card p-6">
                   <h3 className="font-semibold">Social posts</h3>
                   <div className="mt-3 space-y-3">
-                    {kit.socialPosts.map((s, i) => (
+                    {(Array.isArray(kit.socialPosts) ? kit.socialPosts : []).map((s, i) => (
                       <div key={i} className="rounded-lg bg-muted p-3 text-sm">{s}<CopyBtn text={s} /></div>
                     ))}
                   </div>
