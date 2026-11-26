@@ -43,6 +43,7 @@ type Manuscript = Parameters<typeof buildPdf>[0];
 type Chapter = Parameters<typeof buildPdf>[1][number] & { id: string };
 
 const CHAPTER_PHOTO_FORMATS = "image/jpeg,image/png,image/webp";
+const CHARACTER_SCENE = "Show the book's recurring character with their face clearly visible. ";
 const MAX_CHAPTER_PHOTO_BYTES = 15 * 1024 * 1024;
 
 async function preparePhoto(file: File) {
@@ -529,6 +530,7 @@ function ProductPage() {
 
   const imageChapters = data?.ch.filter((chapter) => chapter.image_url) ?? [];
   const coverReference = imageChapters.find((chapter) => chapter.id === coverReferenceId)
+    ?? imageChapters.find((chapter) => chapter.image_prompt?.startsWith(CHARACTER_SCENE))
     ?? imageChapters.find((chapter) => chapter.image_prompt) ?? imageChapters[0];
 
   const useChapterArtwork = () => task("cover", async () => {
@@ -538,6 +540,7 @@ function ProductPage() {
 
   const makeCover = (mode: "complete" | "artwork") => task("cover", async () => {
     const r = await coverFn({ data: {
+      productId: id,
       title: data!.p.title.slice(0, 200), topic: data!.p.topic.slice(0, 300),
       subtitle: (data!.p.subtitle ?? "").slice(0, 300), promise: (data!.p.promise ?? "").slice(0, 400),
       audience: (data!.p.audience ?? "").slice(0, 300), style: theme.imageStyle,
@@ -606,7 +609,7 @@ function ProductPage() {
   };
 
   const oneImage = async (cid: string, prompt: string, referenceImage?: string, preserveUploads = false) => {
-    const r = await imgFn({ data: { prompt, style: theme.imageStyle, referenceImage } });
+    const r = await imgFn({ data: { productId: id, prompt, style: theme.imageStyle, referenceImage } });
     const update = supabase.from("chapters").update({ image_url: r.dataUrl, image_prompt: prompt })
       .eq("product_id", id).eq("id", cid);
     // Uploaded pictures have no AI prompt. Recheck before saving in case another tab uploaded one.
@@ -646,8 +649,10 @@ function ProductPage() {
       let referenceImage = coverReference?.image_url ?? data.p.cover_url ?? undefined;
       for (const [k, it] of items.entries()) {
         try {
-          const image = await oneImage(it.id, it.prompt, referenceImage, true);
-          referenceImage ??= image;
+          const featuresCharacter = it.featuresCharacter === true;
+          const prompt = featuresCharacter ? CHARACTER_SCENE + it.prompt : it.prompt;
+          const image = await oneImage(it.id, prompt, featuresCharacter ? referenceImage : undefined, true);
+          if (featuresCharacter) referenceImage ??= image;
         } catch (e) { toast.error((e as Error).message); }
         setImgProgress({ done: k + 1, total: items.length });
         await refresh();

@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { bookCharacterDirection } from "./book-character";
 import { checkDraftDeliverables } from "./draft-deliverables";
 import { normalizeMarkdownTables } from "./markdown";
 import { isMarketCountry, marketCountryName } from "./markets";
@@ -287,20 +288,20 @@ export const planImages = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const out = await ask(context, 
       "You are an art director for ebooks.",
-      `Ebook "${data.title}". Chapters:\n${data.chapters.map((c) => `${c.id}: ${c.title} — ${c.summary}`).join("\n")}\n\nChoose the chapters where a picture genuinely helps the reader (usually most, skip purely abstract ones). For each, describe one concrete visual scene (no text in image). Return JSON: {"images":[{"id":"chapter id","prompt":"scene description"}]}`,
+      `Ebook "${data.title}". Chapters:\n${data.chapters.map((c) => `${c.id}: ${c.title} — ${c.summary}`).join("\n")}\n\nChoose the chapters where a picture genuinely helps the reader (usually most, skip purely abstract ones). For each, describe one concrete visual scene (no text in image). When a person is the focus, refer to them as the book's recurring character and leave their physical appearance to the image generator. Use object-only scenes where they explain the material better. Set featuresCharacter to true only when the scene shows the recurring character with their face visible. Return JSON: {"images":[{"id":"chapter id","prompt":"scene description","featuresCharacter":true}]}`,
       true,
     );
-    return parseJson<{ images: { id: string; prompt: string }[] }>(out);
+    return parseJson<{ images: { id: string; prompt: string; featuresCharacter?: boolean }[] }>(out);
   });
 
 export const generateSectionImage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({ prompt: z.string().max(1000), style: z.string().max(300), referenceImage: imageReference }).parse(d))
+  .inputValidator((d) => z.object({ productId: z.string().uuid(), prompt: z.string().max(1000), style: z.string().max(300), referenceImage: imageReference }).parse(d))
   .handler(async ({ data, context }) => {
     try {
       const res = await generateImage(context, {
         prompt: `${data.prompt}. Style: ${data.style}. No text, no letters, no watermark. Wide landscape composition.`
-          + (data.referenceImage ? " Use the attached artwork for visual continuity. When the same main character appears in this scene, keep their recognizable face, skin tone, hair, and age. Follow the new scene and ignore lettering from the reference." : ""),
+          + " " + bookCharacterDirection(data.productId, Boolean(data.referenceImage)),
         referenceImage: data.referenceImage,
         size: "1536x1024",
       });
@@ -882,7 +883,7 @@ const coverArtPlan = z.object({
 
 export const generateCover = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({ title: z.string().max(200), topic: z.string().max(300),
+  .inputValidator((d) => z.object({ productId: z.string().uuid(), title: z.string().max(200), topic: z.string().max(300),
     subtitle: z.string().max(300).optional(), promise: z.string().max(400).optional(), audience: z.string().max(300).optional(),
     style: z.string().max(300).optional(), palette: z.array(rgbColor).max(4).optional(),
     template: coverLayout.optional(), fallbackLayout: coverLayout.optional(),
@@ -890,7 +891,7 @@ export const generateCover = createServerFn({ method: "POST" })
     marketCountry: marketCountrySchema,
     referenceImage: imageReference,
   }).parse(d))
-  .handler(async ({ data: { referenceImage, ...data }, context }) => {
+  .handler(async ({ data: { productId, referenceImage, ...data }, context }) => {
     let plan: z.infer<typeof coverArtPlan> = {};
     const complete = data.mode === "complete";
     if (!complete) try {
@@ -927,9 +928,7 @@ export const generateCover = createServerFn({ method: "POST" })
           "Framing: " + COVER_LAYOUTS[layout].description,
           "Book brief: " + JSON.stringify(data),
           ...(data.marketCountry ? ["Use locally plausible details for " + marketCountryName(data.marketCountry) + " without stereotyping."] : []),
-        ].join("\n")) + (referenceImage
-          ? "\nUse the attached interior artwork as the visual reference. If it shows the main person, feature that same recognizable person on the cover, keeping their face, skin tone, hair, and age. Adapt the framing to the cover and ignore lettering from the reference."
-          : ""),
+        ].join("\n")) + "\n" + bookCharacterDirection(productId, Boolean(referenceImage)),
         size: complete || layout === "split" ? "1024x1536" : "1536x1024",
       });
       const b64 = res.data?.[0]?.b64_json;
