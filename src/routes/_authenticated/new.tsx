@@ -278,10 +278,15 @@ function NewProduct() {
                 <Label htmlFor="product-audience">Who is it for?</Label>
                 <Input id="product-audience" placeholder="e.g. Recent U.S. graduates" maxLength={300} value={audience} onChange={(e) => setAudience(e.target.value)} />
               </div>
-              <div className="space-y-2"><p className="text-sm font-medium">Format</p><Chips value={type} options={TYPES} onChange={setType} /></div>
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Format</p>
+                <Chips value={type} options={TYPES} onChange={setType} />
+                {type === "mini-course" && <p className="text-sm text-muted-foreground">Teach a skill with short lessons, practice, and an explained answer key.</p>}
+                {type === "workbook" && <p className="text-sm text-muted-foreground">Help readers complete their own plan with fillable worksheets.</p>}
+              </div>
               <div className="space-y-2"><p className="text-sm font-medium">Tone</p><Chips value={tone} options={TONES} onChange={setTone} /></div>
               <div className="space-y-2">
-                <Label htmlFor="chapter-count">Number of chapters: {count}</Label>
+                <Label htmlFor="chapter-count">{type === "mini-course" ? "Lessons" : "Chapters"} ({count})</Label>
                 <input id="chapter-count" type="range" min={3} max={12} value={count} onChange={(e) => setCount(+e.target.value)} className="w-full accent-primary" />
               </div>
             </fieldset>

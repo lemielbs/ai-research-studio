@@ -1,6 +1,7 @@
 import type { jsPDF } from "jspdf";
 import { getTheme, rgb, type RGB, type Theme } from "./themes";
 import { normalizeMarkdownTables, readMarkdownTable } from "./markdown";
+import { LESSON_SECTIONS, MINI_COURSE, splitLesson } from "./mini-course";
 
 type Ch = { title: string; content: string; image_url?: string | null };
 type Source = { title: string; url: string };
@@ -43,7 +44,11 @@ function drawCover(p: P, doc: jsPDF, surface: CoverSurface) {
   surface.fill(theme.coverBg, [0, 0, w, h]);
   if (!p.cover && split) surface.fill(theme.accent, [w - 14, 0, 14, h]);
   if (!p.cover && imageFirst) surface.fill(theme.soft, [0, 0, w, h * 0.2]);
-  surface.fill(theme.accent, [margin, textTop - 25, 42, 3]);
+  if (p.productType === MINI_COURSE) {
+    surface.text(theme.coverInk, { lines: ["MINI-COURSE"], font: theme.body, weight: "bold", size: 11, spacing: 1, height: 11 }, margin, textTop - 29);
+  } else {
+    surface.fill(theme.accent, [margin, textTop - 25, 42, 3]);
+  }
 
   const fitText = (
     text: string,
@@ -337,6 +342,8 @@ export async function buildPdf(
   ];
   const rule = tint(t.ink, 0.25);
   const workbook = p.productType === "workbook";
+  const course = p.productType === MINI_COURSE;
+  const lessons = course ? chapters.map(({ content }) => splitLesson(content)) : [];
   const panel = tint(t.soft, workbook ? 0.72 : 0.55);
   const forms = interactive ? await import("jspdf") : undefined;
   let fieldNumber = 0;
@@ -430,20 +437,33 @@ export async function buildPdf(
     breakPage();
     fill(t.accent); doc.rect(M, y, 42, 3, "F");
     ink(t.ink); doc.setFont(t.heading, "bold"); doc.setFontSize(30);
-    doc.text("Contents", M, y + 43);
-    y += 70;
+    doc.text(course ? "Lesson map" : "Contents", M, y + 43);
+    if (course) {
+      doc.setFont(t.body, "normal"); doc.setFontSize(11);
+      doc.text(lessons.some(({ hasApplication }) => hasApplication)
+        ? "Follow the lessons in order, then try the final challenge."
+        : "Follow the lessons in order, starting with lesson 1.", M, y + 64);
+    }
+    y += course ? 84 : 70;
   };
   startContents();
   for (const [index, chapter] of chapters.entries()) {
     doc.setFont(t.body, "normal"); doc.setFontSize(12);
     const lines: string[] = doc.splitTextToSize(chapterTitle(chapter.title), innerWidth - 82);
-    const height = Math.max(34, lines.length * 16 + 13);
+    const outcome = lessons[index]?.outcome?.replace(/[*_]/g, "").replace(/\s+/g, " ");
+    doc.setFontSize(10);
+    const outcomeLines: string[] = outcome ? doc.splitTextToSize(outcome, innerWidth - 96) : [];
+    const height = Math.max(34, lines.length * 16 + 13 + (outcomeLines.length ? 14 : 0));
     if (y + height > contentBottom) startContents();
     contentsRows.push({ page: doc.getNumberOfPages(), y, height });
     ink(t.ink); doc.setFont(t.body, "bold"); doc.setFontSize(10);
     doc.text(String(index + 1).padStart(2, "0"), M, y + 15);
     doc.setFont(t.body, "normal"); doc.setFontSize(12);
     doc.text(lines, M + 34, y + 15, { lineHeightFactor: 16 / 12 });
+    if (outcomeLines.length) {
+      doc.setFontSize(10);
+      doc.text(outcomeLines[0] + (outcomeLines.length > 1 ? "…" : ""), M + 34, y + 15 + lines.length * 16);
+    }
     doc.setDrawColor(...rule); doc.setLineWidth(0.4);
     doc.line(M, y + height - 1, W - M, y + height - 1);
     y += height;
@@ -475,7 +495,7 @@ export async function buildPdf(
     fill(panel); doc.roundedRect(M, y, innerWidth, headerHeight, 5, 5, "F");
     fill(t.accent); doc.rect(M, y, 4, headerHeight, "F");
     ink(t.ink); doc.setFont(t.body, "bold"); doc.setFontSize(9);
-    doc.text("CHAPTER " + (i + 1), M + 15, y + 20);
+    doc.text((course ? "LESSON " : "CHAPTER ") + (i + 1), M + 15, y + 20);
     doc.setFont(t.heading, "bold"); doc.setFontSize(28);
     doc.text(titleLines, M + padding, y + 48, { lineHeightFactor: 32 / 28 });
     if (image) {
@@ -483,7 +503,7 @@ export async function buildPdf(
       doc.addImage(image.src, "JPEG", ...artworkBounds(frame, image.width, image.height, "contain"));
     }
     y += headerHeight + 15;
-    const source = normalizeWorksheetLines(normalizeMarkdownTables(c.content).trim().split("\n"));
+    const source = normalizeWorksheetLines(normalizeMarkdownTables(lessons[i]?.body ?? c.content).trim().split("\n"));
     let splitTableAt = -1;
     let lastWorksheet = -1;
     if (i === chapters.length - 1) {
@@ -580,6 +600,22 @@ export async function buildPdf(
       }
 
       const worksheetTitle = l.match(/^#{1,3}\s+Worksheet:\s*(.+)$/i);
+      const lessonSection = course && l.match(/^##\s+(.+)$/)?.[1];
+      if (lessonSection && Object.values(LESSON_SECTIONS).some((label) => label.toLowerCase() === lessonSection.toLowerCase())) {
+        if (lessonSection.toLowerCase() === LESSON_SECTIONS.check.toLowerCase() && y + 102 <= contentBottom) {
+          doc.setDrawColor(...rule); doc.setLineWidth(0.4);
+          doc.line(M, y + 6, W - M, y + 6);
+          doc.line(M, y + 24, W - M, y + 24);
+          y += 34;
+        }
+        ensure(68);
+        fill(panel); doc.roundedRect(M, y, innerWidth, 25, 4, 4, "F");
+        fill(t.accent); doc.rect(M, y, 3, 25, "F");
+        ink(t.ink); doc.setFont(t.heading, "bold"); doc.setFontSize(13);
+        doc.text(lessonSection, M + 12, y + 17);
+        y += 40;
+        continue;
+      }
       if (worksheetTitle) {
         worksheet = "";
         doc.setFont(t.heading, "bold"); doc.setFontSize(20);
@@ -857,6 +893,32 @@ export async function buildPdf(
       }
       for (const ln of lines) { ensure(lineHeight); doc.text(ln, M + indent, y); y += lineHeight; }
     }
+  }
+
+  if (lessons.some(({ answer }) => answer)) {
+    breakPage();
+    fill(t.accent); doc.rect(M, y, 42, 3, "F");
+    ink(t.ink); doc.setFont(t.heading, "bold"); doc.setFontSize(30);
+    doc.text("Answer key", M, y + 43);
+    y += 72;
+    lessons.forEach(({ answer }, index) => {
+      if (!answer) return;
+      doc.setFont(t.heading, "bold"); doc.setFontSize(15);
+      const heading: string[] = doc.splitTextToSize(`Lesson ${index + 1} - ${chapterTitle(chapters[index]!.title)}`, innerWidth);
+      ensure(heading.length * 20 + 34);
+      doc.text(heading, M, y, { lineHeightFactor: 20 / 15 });
+      y += heading.length * 20 + 5;
+      doc.setFont(t.body, "normal"); doc.setFontSize(12);
+      for (const paragraph of answer.split("\n")) {
+        const lines: string[] = doc.splitTextToSize(quoteText(paragraph), innerWidth);
+        for (const line of lines) {
+          ensure(18);
+          doc.text(line, M, y);
+          y += 18;
+        }
+      }
+      y += 16;
+    });
   }
 
   const citedUrls = new Set(
