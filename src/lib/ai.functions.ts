@@ -793,6 +793,7 @@ export const previewDraftFix = createServerFn({ method: "POST" })
   .inputValidator((value) => z.object({
     productId: z.string().uuid(), finding: draftFinding, intendedValue: z.string().trim().max(160).optional(),
     verifyCoverage: z.boolean().optional(),
+    chapterId: z.string().uuid().optional(),
   }).parse(value))
   .handler(async ({ data, context }): Promise<DraftFix> => {
     if (data.finding.category === "consistency" && !data.intendedValue) throw new Error("Enter the value or wording to keep.");
@@ -803,6 +804,9 @@ export const previewDraftFix = createServerFn({ method: "POST" })
     const product = productResult.data;
     const chapters = chapterResult.data as { id: string; title: string; content: string }[] | null;
     if (productResult.error || chapterResult.error || !product || !chapters?.length) throw new Error("Couldn't load the draft.");
+    if (data.chapterId && !chapters.some(({ id, content }) => id === data.chapterId && content.trim())) {
+      throw new Error("This lesson or chapter is no longer available to edit.");
+    }
     const sameCoverage = (finding: z.infer<typeof draftFinding>) =>
       finding.category === data.finding.category && finding.location === data.finding.location && finding.action === data.finding.action;
     if (data.verifyCoverage && !checkDraftDeliverables(product, chapters).some((finding) =>
@@ -858,13 +862,17 @@ export const previewDraftFix = createServerFn({ method: "POST" })
         "Copy before verbatim, including punctuation and newlines. Preserve unrelated text. For an insertion copy a short unique anchor paragraph into before and include it intact with the insertion in after.",
         "To add a missing worksheet, use ## Worksheet: followed by > Field: lines. For unsupported claims, qualify or remove the claim without inventing sources.",
         "For inconsistent passages show both exact quotes as evidence and use the reader's chosen value verbatim in after. Fix one passage at a time.",
-        JSON.stringify({ product, chapters: available, finding: data.finding, intendedValue: data.intendedValue }),
+        ...(data.chapterId ? ["This is a PDF export finding. Edit only the chapter with the supplied chapterId. Keep the rest of the draft and its existing structure intact."] : []),
+        JSON.stringify({ product, chapters: available, finding: data.finding, intendedValue: data.intendedValue, chapterId: data.chapterId }),
       ].join("\n"), true);
     let parsed: z.SafeParseReturnType<unknown, z.infer<typeof fixSchema>>;
     try { parsed = fixSchema.safeParse(parseJson<unknown>(text)); }
     catch { throw new Error("The AI returned an unreadable fix. Try previewing again."); }
     if (!parsed.success) throw new Error("The AI didn't produce a targeted fix. Try previewing again.");
     const { edit } = parsed.data;
+    if (data.chapterId && (edit.target !== "chapter" || edit.chapterId !== data.chapterId)) {
+      throw new Error("The proposed fix targeted a different chapter. Try previewing again.");
+    }
     const matches = parsed.data.evidence.filter(({ chapterId, quote }) => chapters.some((c) => c.id === chapterId && c.content.includes(quote)));
     if (data.finding.category === "consistency") {
       if (new Set(matches.map(({ chapterId, quote }) => chapterId + ":" + quote)).size < 2) throw new Error("The AI couldn't match both original passages. Try previewing again.");

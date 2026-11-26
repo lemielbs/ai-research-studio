@@ -2,6 +2,7 @@ import type { jsPDF } from "jspdf";
 import { getTheme, rgb, type RGB, type Theme } from "./themes";
 import { normalizeMarkdownTables, readMarkdownTable } from "./markdown";
 import { LESSON_SECTIONS, MINI_COURSE, splitLesson } from "./mini-course";
+import { createPdfCheck, type PdfCheck } from "./pdf-check";
 
 type Ch = { title: string; content: string; image_url?: string | null };
 type Source = { title: string; url: string };
@@ -134,8 +135,9 @@ async function createCoverDocument() {
   return new jsPDF({ unit: "pt", format: "a4" });
 }
 
-export async function buildCoverPdf(p: P) {
+export async function buildCoverPdf(p: P, check?: PdfCheck) {
   const doc = await createCoverDocument();
+  const drawText = check?.text(doc) ?? doc.text.bind(doc);
   drawCover(p, doc, {
     fill(color, rect) {
       doc.setFillColor(...color);
@@ -149,8 +151,9 @@ export async function buildCoverPdf(p: P) {
         // Keep the frame path open until jsPDF applies the clip.
         doc.rect(...rect, null).clip().discardPath();
         doc.addImage(p.cover, "JPEG", ...artworkBounds(rect, size.width, size.height, fit));
+        check?.mark(doc);
       } catch {
-        // Keep the themed background if a previously saved image is invalid.
+        check?.issue(1, "The saved cover artwork could not be rendered.");
       } finally {
         doc.restoreGraphicsState();
       }
@@ -159,7 +162,7 @@ export async function buildCoverPdf(p: P) {
       doc.setFont(text.font, text.weight);
       doc.setFontSize(text.size);
       doc.setTextColor(...color);
-      doc.text(text.lines, x, y, { baseline: "top", lineHeightFactor: text.spacing });
+      drawText(text.lines, x, y, { baseline: "top", lineHeightFactor: text.spacing });
     },
   });
   return doc;
@@ -320,14 +323,16 @@ export async function buildPdf(
   p: P,
   chapters: Ch[],
   onChapterPage?: (index: number, pageNumber: number) => void,
-  { interactive = true, linkContents = true, onSamplePage }: {
+  { interactive = true, linkContents = true, onSamplePage, check }: {
     interactive?: boolean;
     linkContents?: boolean;
     onSamplePage?: (kind: "worksheet" | "example" | "example-table", page: number) => void;
+    check?: PdfCheck;
   } = {},
 ) {
   const t = p.customStyle ?? getTheme(p.theme);
-  const doc = await buildCoverPdf(p);
+  const doc = await buildCoverPdf(p, check);
+  const drawText = check?.text(doc) ?? doc.text.bind(doc);
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const M = 49;
@@ -346,12 +351,31 @@ export async function buildPdf(
   const lessons = course ? chapters.map(({ content }) => splitLesson(content)) : [];
   const panel = tint(t.soft, workbook ? 0.72 : 0.55);
   const forms = interactive ? await import("jspdf") : undefined;
+  let workbookFields = 0;
+  let foundWorksheet = false;
+  let openWorksheet: { name: string; page: number; fields: number } | undefined;
+  const closeWorksheet = () => {
+    if (openWorksheet && !openWorksheet.fields) {
+      check?.issue(openWorksheet.page, `The worksheet “${openWorksheet.name}” has no fillable answers.`,
+        `Add labeled answer fields to the existing worksheet ${openWorksheet.name} using > Field: lines after its instructions.`);
+    }
+    openWorksheet = undefined;
+  };
+  const recordField = (rect: [number, number, number, number]) => {
+    if (!check) return;
+    check.field(doc, Boolean(forms), rect);
+    if (forms) {
+      workbookFields++;
+      if (openWorksheet) openWorksheet.fields++;
+    }
+  };
   let fieldNumber = 0;
   const fieldName = (label: string) => {
     const readableLabel = label.replace(/[^a-z\d -]/gi, " ").replace(/\s+/g, " ").trim().slice(0, 100);
     return "Response " + (++fieldNumber) + (readableLabel ? " - " + readableLabel : "");
   };
   const addTextField = (label: string, [x, top, width, height]: [number, number, number, number], fontSize = 11, multiline = false) => {
+    recordField([x, top, width, height]);
     if (!forms) return;
     const response = new forms.AcroFormTextField();
     response.fieldName = fieldName(label);
@@ -374,7 +398,7 @@ export async function buildPdf(
       const previousSize = doc.getFontSize();
       doc.setFont(t.body, "bold"); doc.setFontSize(10);
       const lines: string[] = doc.splitTextToSize(worksheet + " (continued)", innerWidth);
-      ink(t.ink); doc.text(lines, M, y, { lineHeightFactor: 1.3 });
+      ink(t.ink); drawText(lines, M, y, { lineHeightFactor: 1.3 });
       y += lines.length * 13 + 12;
       doc.setFont(previousFont.fontName, previousFont.fontStyle); doc.setFontSize(previousSize);
     }
@@ -392,7 +416,7 @@ export async function buildPdf(
         doc.splitTextToSize(cell.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1"), width - padding * 2),
       );
       const lines = header ? columns.map((column) => column.slice(0, 8)) : columns;
-      return { lines, count: Math.max(1, ...lines.map((column) => column.length)) };
+      return { lines, count: Math.max(1, ...lines.map((column) => column.length)), truncated: header && columns.some((column) => column.length > 8) };
     };
     const header = wrap(table.headers, true);
     const rows = table.rows.map((row) => {
@@ -426,6 +450,7 @@ export async function buildPdf(
       ensure(17);
       ink(t.ink);
       doc.textWithLink(row, M + 16, y, { url: source.url });
+      check?.mark(doc);
       y += 17;
     }
     y += 5;
@@ -437,10 +462,10 @@ export async function buildPdf(
     breakPage();
     fill(t.accent); doc.rect(M, y, 42, 3, "F");
     ink(t.ink); doc.setFont(t.heading, "bold"); doc.setFontSize(30);
-    doc.text(course ? "Lesson map" : "Contents", M, y + 43);
+    drawText(course ? "Lesson map" : "Contents", M, y + 43);
     if (course) {
       doc.setFont(t.body, "normal"); doc.setFontSize(11);
-      doc.text(lessons.some(({ hasApplication }) => hasApplication)
+      drawText(lessons.some(({ hasApplication }) => hasApplication)
         ? "Follow the lessons in order, then try the final challenge."
         : "Follow the lessons in order, starting with lesson 1.", M, y + 64);
     }
@@ -457,12 +482,12 @@ export async function buildPdf(
     if (y + height > contentBottom) startContents();
     contentsRows.push({ page: doc.getNumberOfPages(), y, height });
     ink(t.ink); doc.setFont(t.body, "bold"); doc.setFontSize(10);
-    doc.text(String(index + 1).padStart(2, "0"), M, y + 15);
+    drawText(String(index + 1).padStart(2, "0"), M, y + 15);
     doc.setFont(t.body, "normal"); doc.setFontSize(12);
-    doc.text(lines, M + 34, y + 15, { lineHeightFactor: 16 / 12 });
+    drawText(lines, M + 34, y + 15, { lineHeightFactor: 16 / 12 });
     if (outcomeLines.length) {
       doc.setFontSize(10);
-      doc.text(outcomeLines[0] + (outcomeLines.length > 1 ? "…" : ""), M + 34, y + 15 + lines.length * 16);
+      drawText(outcomeLines[0] + (outcomeLines.length > 1 ? "…" : ""), M + 34, y + 15 + lines.length * 16);
     }
     doc.setDrawColor(...rule); doc.setLineWidth(0.4);
     doc.line(M, y + height - 1, W - M, y + height - 1);
@@ -476,6 +501,7 @@ export async function buildPdf(
 
   const destinations: { page: number; top: number }[] = [];
   for (const [i, c] of chapters.entries()) {
+    check?.chapter(i);
     worksheet = "";
     const image = readChapterImage(c.image_url);
     const imageWidth = 192;
@@ -491,13 +517,20 @@ export async function buildPdf(
     const chapterPage = doc.getNumberOfPages();
     destinations.push({ page: chapterPage, top: y });
     onChapterPage?.(i, chapterPage);
+    if (check && c.image_url && !image) check.issue(chapterPage, "The saved chapter image could not be rendered.");
+    if (check && course) {
+      const lesson = lessons[i]!;
+      const missing = i === chapters.length - 1 && !lesson.hasApplication ? [...lesson.missing, LESSON_SECTIONS.application] : lesson.missing;
+      if (missing.length) check.issue(chapterPage, `This lesson is missing ${missing.join(", ")}.`,
+        `Add these missing sections using exact ## headings: ${missing.join(", ")}. Preserve the existing lesson sections.`);
+    }
 
     fill(panel); doc.roundedRect(M, y, innerWidth, headerHeight, 5, 5, "F");
     fill(t.accent); doc.rect(M, y, 4, headerHeight, "F");
     ink(t.ink); doc.setFont(t.body, "bold"); doc.setFontSize(9);
-    doc.text((course ? "LESSON " : "CHAPTER ") + (i + 1), M + 15, y + 20);
+    drawText((course ? "LESSON " : "CHAPTER ") + (i + 1), M + 15, y + 20);
     doc.setFont(t.heading, "bold"); doc.setFontSize(28);
-    doc.text(titleLines, M + padding, y + 48, { lineHeightFactor: 32 / 28 });
+    drawText(titleLines, M + padding, y + 48, { lineHeightFactor: 32 / 28 });
     if (image) {
       const frame: CoverRect = [W - M - padding - imageWidth, y + (headerHeight - imageHeight) / 2, imageWidth, imageHeight];
       doc.addImage(image.src, "JPEG", ...artworkBounds(frame, image.width, image.height, "contain"));
@@ -559,11 +592,18 @@ export async function buildPdf(
           doc.setFontSize(10);
           ink(t.ink);
           cells.forEach((lines, column) => {
-            if (lines.length) doc.text(lines, M + column * width + padding, y + 15, { lineHeightFactor: tableLeading / 10 });
+            if (check && lines.some((line) => doc.getTextWidth(line) > width - 2 * padding + 1)) {
+              check.issue(doc.getNumberOfPages(), "Table text may overflow its column.",
+                "Shorten the table cell wording or split the table into fewer columns, preserving the information.");
+            }
+            if (lines.length) drawText(lines, M + column * width + padding, y + 15, { lineHeightFactor: tableLeading / 10 });
           });
           y += height;
         };
         ensure(height <= contentBottom - M && index !== splitTableAt ? height : startHeight);
+        if (check && (!rows.length || header.truncated)) check.issue(doc.getNumberOfPages(),
+          rows.length ? "A long table heading was cut short." : "A table has headings and no data rows.",
+          rows.length ? "Shorten the column headings while preserving the meaning and every row." : "Repair the table with Markdown pipe rows and the same number of cells in each row.");
         drawRow(header.lines, header.count, true);
         for (const [rowIndex, { lines: cells, count: totalLines, writable, inputColumns }] of rows.entries()) {
           let offset = 0;
@@ -594,6 +634,7 @@ export async function buildPdf(
         continue;
       }
       const l = source[index]!.trim().replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g, "$1");
+      const unrenderedTableRow = check && /^\|.*\|.*\|$/.test(l);
       if (!l) {
         if (index > 0 && source[index - 1]?.trim() && !/^\s*>\s*Field:/i.test(source[index - 1]!)) y += 5;
         continue;
@@ -612,11 +653,12 @@ export async function buildPdf(
         fill(panel); doc.roundedRect(M, y, innerWidth, 25, 4, 4, "F");
         fill(t.accent); doc.rect(M, y, 3, 25, "F");
         ink(t.ink); doc.setFont(t.heading, "bold"); doc.setFontSize(13);
-        doc.text(lessonSection, M + 12, y + 17);
+        drawText(lessonSection, M + 12, y + 17);
         y += 40;
         continue;
       }
       if (worksheetTitle) {
+        closeWorksheet();
         worksheet = "";
         doc.setFont(t.heading, "bold"); doc.setFontSize(20);
         const titleLines: string[] = doc.splitTextToSize(worksheetTitle[1]!, innerWidth - 30);
@@ -649,17 +691,24 @@ export async function buildPdf(
         ensure(Math.min(contentBottom - M, height + 18 + Math.max(85, openingHeight)));
         worksheet = worksheetTitle[1]!;
         onSamplePage?.("worksheet", doc.getNumberOfPages());
+        if (check && workbook) {
+          foundWorksheet = true;
+          openWorksheet = { name: worksheet, page: doc.getNumberOfPages(), fields: 0 };
+        }
         doc.setDrawColor(...rule); doc.setLineWidth(0.5);
         doc.roundedRect(M, y, innerWidth, height, 5, 5, "S");
         fill(t.accent); doc.rect(M + 14, y + 12, 18, 2, "F");
         ink(t.ink); doc.setFont(t.body, "bold"); doc.setFontSize(9);
-        doc.text("WORKSHEET", M + 40, y + 17);
+        drawText("WORKSHEET", M + 40, y + 17);
         doc.setFont(t.heading, "bold"); doc.setFontSize(20);
-        doc.text(titleLines, M + 14, y + 40, { lineHeightFactor: 24 / 20 });
+        drawText(titleLines, M + 14, y + 40, { lineHeightFactor: 24 / 20 });
         y += height + 18;
         continue;
       }
-      if (worksheet && /^#{1,2}\s/.test(l) && !/^#{1,2}\s+(?:Instructions?|Fields|Required inputs)\b/i.test(l)) worksheet = "";
+      if (worksheet && /^#{1,2}\s/.test(l) && !/^#{1,2}\s+(?:Instructions?|Fields|Required inputs)\b/i.test(l)) {
+        closeWorksheet();
+        worksheet = "";
+      }
 
       const example = l.match(/^>\s*Example:\s*(.*)$/i);
       if (example) {
@@ -704,14 +753,14 @@ export async function buildPdf(
           fill(panel); doc.roundedRect(M, y, innerWidth, height, 5, 5, "F");
           fill(t.accent); doc.rect(M, y, 3, height, "F");
           ink(t.ink); doc.setFont(t.body, "bold"); doc.setFontSize(9);
-          doc.text(offset ? "WORKED EXAMPLE (CONTINUED)" : "WORKED EXAMPLE", M + 16, y + 16);
+          drawText(offset ? "WORKED EXAMPLE (CONTINUED)" : "WORKED EXAMPLE", M + 16, y + 16);
           if (titleLines.length) {
             doc.setFont(t.heading, "bold"); doc.setFontSize(13);
-            doc.text(titleLines, M + 16, y + 32, { lineHeightFactor: 15 / 13 });
+            drawText(titleLines, M + 16, y + 32, { lineHeightFactor: 15 / 13 });
           }
           if (part.length) {
             doc.setFont(t.body, "normal"); doc.setFontSize(11);
-            doc.text(part, M + 16, y + headingHeight - 5, { lineHeightFactor: 15 / 11 });
+            drawText(part, M + 16, y + headingHeight - 5, { lineHeightFactor: 15 / 11 });
           }
           y += height + 12;
           offset += part.length;
@@ -742,7 +791,7 @@ export async function buildPdf(
           ensure(height + 12);
           fill(t.soft); doc.roundedRect(M, y, width, height, 7, 7, "F");
           ink(t.ink); doc.setFont(t.heading, "bold"); doc.setFontSize(13);
-          doc.text(allocation ? "Payday allocation" : "Progress milestones", M + 12, y + 22);
+          drawText(allocation ? "Payday allocation" : "Progress milestones", M + 12, y + 22);
           const trackX = M + 14;
           const trackW = width - 28;
           const trackY = y + 37;
@@ -771,9 +820,9 @@ export async function buildPdf(
           entries.forEach(({ value }, i) => {
             const x = M + column * (i + 0.5);
             ink(t.ink); doc.setFont(t.heading, "bold"); doc.setFontSize(11);
-            doc.text(allocation ? String(value) + "%" : "Day " + value, x, y + 67, { align: "center" });
+            drawText(allocation ? String(value) + "%" : "Day " + value, x, y + 67, { align: "center" });
             doc.setFont(t.body, "normal"); doc.setFontSize(10);
-            doc.text(labels[i]!, x, y + 83, { align: "center", lineHeightFactor: 1.3 });
+            drawText(labels[i]!, x, y + 83, { align: "center", lineHeightFactor: 1.3 });
           });
           y += height + 16;
           continue;
@@ -790,7 +839,7 @@ export async function buildPdf(
         const fieldGap = worksheet ? 11 : 13;
         ensure(lines.length * 16 + responseHeight + fieldGap - 6);
         ink(t.ink);
-        doc.text(lines, M, y, { lineHeightFactor: 16 / 11 });
+        drawText(lines, M, y, { lineHeightFactor: 16 / 11 });
         y += lines.length * 16 - 6;
         doc.setDrawColor(...rule); doc.setLineWidth(0.5);
         doc.rect(M, y, innerWidth, responseHeight, "S");
@@ -798,14 +847,15 @@ export async function buildPdf(
         y += responseHeight + fieldGap;
         continue;
       }
-      const check = l.match(checklistItem);
-      if (check) {
-        const label = check[2]!;
-        const checked = check[1]!.toLowerCase() === "x";
+      const checkbox = l.match(checklistItem);
+      if (checkbox) {
+        const label = checkbox[2]!;
+        const checked = checkbox[1]!.toLowerCase() === "x";
         doc.setFont(t.body, "normal"); doc.setFontSize(11);
         const lines = doc.splitTextToSize(label, innerWidth - 26);
         ensure(lines.length * 16 + 6);
         doc.setDrawColor(...t.accent); doc.setLineWidth(1.2); doc.rect(M, y - 10, 12, 12);
+        recordField([M, y - 10, 12, 12]);
         if (forms) {
           const response = new forms.AcroFormCheckBox();
           response.fieldName = fieldName(label);
@@ -819,7 +869,7 @@ export async function buildPdf(
           doc.line(M + 3, y - 4, M + 5, y - 1);
           doc.line(M + 5, y - 1, M + 10, y - 8);
         }
-        ink(t.ink); doc.text(lines, M + 22, y, { lineHeightFactor: 16 / 11 }); y += lines.length * 16 + 6;
+        ink(t.ink); drawText(lines, M + 22, y, { lineHeightFactor: 16 / 11 }); y += lines.length * 16 + 6;
         continue;
       }
       if (l.startsWith(">")) {
@@ -851,9 +901,9 @@ export async function buildPdf(
             else doc.line(M + 1, y + 2, M + 1, y + height - 8);
           }
           ink(t.ink); doc.setFont(t.body, "bold"); doc.setFontSize(9);
-          doc.text(!workbook && /^action$/i.test(label) ? "TRY THIS" : label.toUpperCase(), M + inset, y + (compact ? 9 : 14));
+          drawText(!workbook && /^action$/i.test(label) ? "TRY THIS" : label.toUpperCase(), M + inset, y + (compact ? 9 : 14));
           doc.setFont(t.body, "normal"); doc.setFontSize(11);
-          doc.text(part, M + inset, y + (compact ? 24 : 29), { lineHeightFactor: 15 / 11 });
+          drawText(part, M + inset, y + (compact ? 24 : 29), { lineHeightFactor: 15 / 11 });
           y += height + 6;
           offset += part.length;
           if (offset < lines.length) breakPage();
@@ -872,6 +922,7 @@ export async function buildPdf(
         let previous = index - 1;
         while (previous >= 0 && !source[previous]!.trim()) previous--;
         const closingGap = worksheet && /^\s*>\s*Field:/i.test(source[previous] ?? "") ? 6 : 0;
+        closeWorksheet();
         worksheet = "";
         if (y + closingGap + lines.length * lineHeight > contentBottom) breakPage();
         else y += closingGap;
@@ -891,29 +942,43 @@ export async function buildPdf(
           ensure(lines.length * size * 1.55 + 38);
         }
       }
-      for (const ln of lines) { ensure(lineHeight); doc.text(ln, M + indent, y); y += lineHeight; }
+      for (const [lineIndex, ln] of lines.entries()) {
+        ensure(lineHeight);
+        if (unrenderedTableRow && lineIndex === 0) check.issue(doc.getNumberOfPages(),
+          "A table row is likely to appear as plain text.", "Repair the malformed Markdown pipe table while preserving the content in the cells.");
+        drawText(ln, M + indent, y);
+        y += lineHeight;
+      }
     }
+    closeWorksheet();
   }
+  if (check && workbook && !workbookFields && !foundWorksheet) {
+    const index = Math.max(0, chapters.length - 1);
+    check.chapter(index);
+    check.issue(destinations[index]?.page ?? 2, "This workbook has no fillable answer fields.",
+      "Add a usable worksheet after the lesson. Use a ## Worksheet: heading and labeled > Field: lines for the reader’s answers.");
+  }
+  check?.chapter();
 
   if (lessons.some(({ answer }) => answer)) {
     breakPage();
     fill(t.accent); doc.rect(M, y, 42, 3, "F");
     ink(t.ink); doc.setFont(t.heading, "bold"); doc.setFontSize(30);
-    doc.text("Answer key", M, y + 43);
+    drawText("Answer key", M, y + 43);
     y += 72;
     lessons.forEach(({ answer }, index) => {
       if (!answer) return;
       doc.setFont(t.heading, "bold"); doc.setFontSize(15);
       const heading: string[] = doc.splitTextToSize(`Lesson ${index + 1} - ${chapterTitle(chapters[index]!.title)}`, innerWidth);
       ensure(heading.length * 20 + 34);
-      doc.text(heading, M, y, { lineHeightFactor: 20 / 15 });
+      drawText(heading, M, y, { lineHeightFactor: 20 / 15 });
       y += heading.length * 20 + 5;
       doc.setFont(t.body, "normal"); doc.setFontSize(12);
       for (const paragraph of answer.split("\n")) {
         const lines: string[] = doc.splitTextToSize(quoteText(paragraph), innerWidth);
         for (const line of lines) {
           ensure(18);
-          doc.text(line, M, y);
+          drawText(line, M, y);
           y += 18;
         }
       }
@@ -936,7 +1001,7 @@ export async function buildPdf(
     ensure(78);
     y += 14;
     ink(t.ink); doc.setFont(t.heading, "bold"); doc.setFontSize(20);
-    doc.text("References", M, y);
+    drawText("References", M, y);
     y += 28;
     for (const reference of references) drawReference(reference);
   }
@@ -946,7 +1011,7 @@ export async function buildPdf(
     const target = destinations[i]!;
     doc.setPage(row.page);
     ink(t.ink); doc.setFont(t.body, "bold"); doc.setFontSize(10);
-    doc.text(String(target.page), W - M, row.y + 15, { align: "right" });
+    drawText(String(target.page), W - M, row.y + 15, { align: "right" });
     if (linkContents) doc.link(M, row.y, innerWidth, row.height, { pageNumber: target.page, top: target.top });
   }
 
@@ -965,4 +1030,10 @@ export async function buildPdf(
 export async function exportPdf(p: P, chapters: Ch[]) {
   const doc = await buildPdf(p, chapters);
   doc.save(`${p.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.pdf`);
+}
+
+export async function checkPdf(p: P, chapters: Ch[]) {
+  const check = createPdfCheck();
+  const doc = await buildPdf(p, chapters, undefined, { check });
+  return { doc, issues: check.finish(doc) };
 }

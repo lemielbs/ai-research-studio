@@ -9,7 +9,8 @@ import { COVER_LAYOUTS, COVER_TEMPLATE_IDS, THEMES, getTheme, rgb, type Theme } 
 import { mdToHtml } from "@/lib/markdown";
 import { isMarketCountry, marketCountryName } from "@/lib/markets";
 import { checkDraftDeliverables } from "@/lib/draft-deliverables";
-import { buildCoverPdf, buildCoverPng, buildPdf, downloadCoverPng, exportPdf } from "@/lib/pdf";
+import { buildCoverPdf, buildCoverPng, buildPdf, checkPdf, downloadCoverPng, exportPdf } from "@/lib/pdf";
+import type { PdfIssue } from "@/lib/pdf-check";
 import { buildLaunchKitSample, downloadLaunchKit } from "@/lib/launch-kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -322,7 +323,8 @@ function ProductPage() {
   const reviewFn = useServerFn(reviewProductDraft);
   const previewFixFn = useServerFn(previewDraftFix);
   const applyFixFn = useServerFn(applyDraftFix);
-  const [activeFix, setActiveFix] = useState<{ source: "review" | "delivery"; index: number } | null>(null);
+  const [activeFix, setActiveFix] = useState<{ source: "review" | "delivery"; index: number } | { source: "pdf"; key: string } | null>(null);
+  const [productTab, setProductTab] = useState("content");
   const [intendedValue, setIntendedValue] = useState("");
   const [proposal, setProposal] = useState<DraftFix | null>(null);
   const [fixBusy, setFixBusy] = useState(false);
@@ -412,13 +414,13 @@ function ProductPage() {
     }
   };
 
-  const makePreview = async (finding: DraftReview["findings"][number], value: string, verifyCoverage = false) => {
+  const makePreview = async (finding: DraftReview["findings"][number], value: string, verifyCoverage = false, chapterId?: string) => {
     if (fixBusy) return;
     setFixBusy(true);
     setProposal(null);
     setFixError("");
     try {
-      setProposal(await previewFixFn({ data: { productId: id, finding, intendedValue: value.trim() || undefined, verifyCoverage } }));
+      setProposal(await previewFixFn({ data: { productId: id, finding, intendedValue: value.trim() || undefined, verifyCoverage, chapterId } }));
     } catch (error) {
       setFixError(error instanceof Error ? error.message : "The fix could not be completed.");
     } finally {
@@ -683,6 +685,32 @@ function ProductPage() {
     theme: theme.id, customStyle, audience: product.audience, coverByline, coverLayout, completeCover, sources,
     productType: product.product_type,
   }), [product, theme.id, customStyle, coverByline, coverLayout, completeCover, sources]);
+  const savedChapters = data?.ch;
+  const [pdfCheck, setPdfCheck] = useState<{
+    book: Manuscript;
+    chapters: Chapter[];
+    issues: PdfIssue[];
+    url?: string;
+    failed?: boolean;
+  } | null>(null);
+  const currentCheck = pdfCheck?.book === pdfBook && pdfCheck?.chapters === savedChapters ? pdfCheck : null;
+  useEffect(() => {
+    if (productTab !== "cover" || !pdfBook || !savedChapters?.length || savedChapters.some(({ content }) => !content.trim())) return;
+    let active = true;
+    let url: string | undefined;
+    void checkPdf(pdfBook, savedChapters).then(({ doc, issues }) => {
+      if (!active) return;
+      url = issues.length ? URL.createObjectURL(doc.output("blob")) : undefined;
+      setPdfCheck({ book: pdfBook, chapters: savedChapters, issues, ...(url ? { url } : {}) });
+    }).catch(() => {
+      if (active) setPdfCheck({ book: pdfBook, chapters: savedChapters, issues: [], failed: true });
+    });
+    return () => {
+      active = false;
+      if (url) URL.revokeObjectURL(url);
+      setPdfCheck(null);
+    };
+  }, [pdfBook, productTab, savedChapters]);
   const download = () => data && pdfBook && exportPdf(pdfBook, data.ch.filter((c) => c.content.trim()));
 
   const savePreviewChapter = async (chapter: Chapter, content: string) => {
@@ -783,7 +811,7 @@ function ProductPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="content">
+      <Tabs value={productTab} onValueChange={setProductTab}>
         <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="content">Develop</TabsTrigger>
           <TabsTrigger value="preview">Preview & edit</TabsTrigger>
@@ -1173,6 +1201,53 @@ function ProductPage() {
               </section>}
               {busy === "cover" && <p role="status" className="text-sm text-muted-foreground">Updating cover…</p>}
               <hr />
+              {allWritten && (
+                <section className="space-y-2 rounded-lg border p-3 text-sm" aria-label="PDF export check">
+                  <h3 className="font-semibold">PDF export check</h3>
+                  <p role="status" className="text-muted-foreground">
+                    {!currentCheck ? "Checking the saved PDF…" : currentCheck.failed ? "The PDF check could not finish. Open Preview & edit to review the layout." : currentCheck.issues.length
+                      ? `${currentCheck.issues.length} ${currentCheck.issues.length === 1 ? "item needs" : "items need"} attention.`
+                      : "No export issues found."}
+                  </p>
+                  {currentCheck && currentCheck.issues.length > 0 && (
+                    <ul className="divide-y">
+                      {currentCheck.issues.map((issue) => {
+                        const chapter = issue.chapterIndex === undefined ? undefined : ch[issue.chapterIndex];
+                        const key = `${chapter?.id ?? ""}-${issue.page}-${issue.message}`;
+                        const fixingIssue = activeFix?.source === "pdf" && activeFix.key === key;
+                        const previewFix = () => {
+                          if (!chapter || !issue.edit) return;
+                          setActiveFix({ source: "pdf", key });
+                          void makePreview({ category: "deliverable", location: chapter.title.slice(0, 180), issue: issue.message.slice(0, 500), action: issue.edit.slice(0, 500) }, "", false, chapter.id);
+                        };
+                        return (
+                          <li key={key} className="space-y-2 py-2">
+                            <p><span className="font-medium">Page {issue.page}.</span> {issue.message}</p>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {currentCheck.url && <a href={`${currentCheck.url}#page=${issue.page}`} target="_blank" rel="noreferrer" className="text-primary underline">Open page</a>}
+                              {chapter && issue.edit && !fixingIssue && (
+                                <Button size="sm" variant="outline" disabled={reviewBusy || editing !== null} onClick={previewFix}>Preview fix with AI</Button>
+                              )}
+                            </div>
+                            {fixingIssue && (
+                              <div className="space-y-2 rounded-lg border p-3">
+                                {fixBusy && <p role="status">{proposal ? "Applying the fix." : "Drafting a fix."}</p>}
+                                {fixError && <p role="alert" className="text-destructive">{fixError}</p>}
+                                {proposal && <DraftFixComparison proposal={proposal} />}
+                                <div className="flex flex-wrap gap-2">
+                                  {proposal ? <Button size="sm" disabled={reviewBusy} onClick={() => void applyPreview()}>Apply fix</Button>
+                                    : !fixBusy && <Button size="sm" disabled={reviewBusy} onClick={previewFix}>Try again</Button>}
+                                  <Button size="sm" variant="ghost" disabled={fixBusy} onClick={() => { setActiveFix(null); setProposal(null); }}>Cancel</Button>
+                                </div>
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </section>
+              )}
               {draftReview?.sourceReview?.claims.some((claim) => claim.assessment === "needs_review") && (
                 <p className="text-sm text-muted-foreground">Some claims still need source review. See Draft review in Develop.</p>
               )}
