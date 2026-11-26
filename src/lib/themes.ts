@@ -6,6 +6,21 @@ export type Theme = {
   cover: "band" | "full" | "split"; imageStyle: string;
 };
 
+export const COVER_TEMPLATE_IDS = ["band", "full", "split"] as const;
+export const COVER_LAYOUTS = {
+  band: { name: "Title first", description: "Large headline with a wide illustration below. Suits longer copy and practical guides." },
+  full: { name: "Image first", description: "Landscape image above the headline. Suits a strong focal subject and a short title." },
+  split: { name: "Portrait split", description: "Text beside a tall image. Suits portraits and a single vertical subject." },
+} as const satisfies Record<Theme["cover"], { name: string; description: string }>;
+
+export const PDF_FONT_PAIRINGS = {
+  "practical": { heading: "helvetica", body: "helvetica", description: "hands-on or youth guides with simple, friendly typography" },
+  "finance-editorial": { heading: "times", body: "helvetica", description: "expressive serif titles with clear numeric figures and instructions" },
+  "magazine": { heading: "helvetica", body: "times", description: "editorial titles and long narrative lessons" },
+  "technical": { heading: "courier", body: "helvetica", description: "technical manuals or data-led guides with readable body text" },
+  "classic": { heading: "times", body: "times", description: "literary, historical, or reflective reading" },
+} as const satisfies Record<string, Pick<Theme, "heading" | "body"> & { description: string }>;
+
 export const THEMES: Theme[] = [
   { id: "minimal", name: "Minimal", blurb: "Clean, airy, lots of white space",
     bg: [255, 255, 255], ink: [30, 30, 30], accent: [20, 20, 20], soft: [242, 242, 240], coverBg: [250, 250, 248], coverInk: [20, 20, 20],
