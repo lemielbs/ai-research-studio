@@ -69,16 +69,15 @@ public final class MainActivity extends Activity {
     }
     private void page(String title){
         LinearLayout shell=new LinearLayout(this);shell.setOrientation(1);shell.setFitsSystemWindows(true);shell.setBackgroundColor(BG);
-        LinearLayout bar=new LinearLayout(this);bar.setGravity(Gravity.CENTER_VERTICAL);bar.setPadding(dp(20),dp(14),dp(20),dp(14));
-        TextView mark=text("S",22,BG,true);mark.setGravity(Gravity.CENTER);mark.setBackground(shape(LIME,11));
-        bar.addView(mark,new LinearLayout.LayoutParams(dp(36),dp(36)));
-        TextView brand=text("  SynthForge",20,INK,true);bar.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
-        if(api!=null && api.signedIn() && !"signin".equals(screen)){
-            TextView account=text("Account",15,LIME,true);account.setPadding(dp(10),dp(12),0,dp(12));account.setOnClickListener(v->account());bar.addView(account);
-        }
-        shell.addView(bar);ScrollView scroll=new ScrollView(this);body=new LinearLayout(this);body.setOrientation(1);body.setPadding(dp(22),dp(16),dp(22),dp(36));
+        ScrollView scroll=new ScrollView(this);body=new LinearLayout(this);body.setOrientation(1);body.setPadding(dp(22),dp(16),dp(22),dp(36));
         scroll.addView(body);shell.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));setContentView(shell);
         body.addView(text(title,32,INK,true));gap(12);
+        if ("library".equals(screen)) {
+            android.widget.Toolbar actions = new android.widget.Toolbar(this);
+            actions.getMenu().add("Refresh").setOnMenuItemClickListener(item -> { library(); return true; });
+            actions.getMenu().add("Account").setOnMenuItemClickListener(item -> { account(); return true; });
+            shell.addView(actions, new LinearLayout.LayoutParams(-1, dp(52)));
+        }
     }
     private void paragraph(String s){TextView v=text(s,16,MUTED,false);v.setLineSpacing(dp(2),1);body.addView(v);gap(12);}
     private void button(String label,boolean primary,Runnable click){
@@ -103,7 +102,7 @@ public final class MainActivity extends Activity {
         .setNegativeButton("Cancel",null).setPositiveButton("Sign out",(dialog,which)->run("Signing out",()->{api.logout();return null;},x->signIn())).show();
     }
     private void library(){
-        screen="library";page("My products");button("Create a draft",true,this::create);button("Refresh library",false,this::library);
+        screen="library";page("My products");button("Create a draft",true,this::create);
         run("Loading your products",()->api.rows("products?select=id,title,subtitle,status,product_type&order=created_at.desc"),rows->{
             if(rows.length()==0)paragraph("Your saved drafts will appear here.");
             for(int i=0;i<rows.length();i++){JSONObject item=rows.getJSONObject(i);card(item.getString("title"),
