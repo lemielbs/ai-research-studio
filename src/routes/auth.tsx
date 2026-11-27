@@ -7,8 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Logo } from "@/components/Logo";
+import { finishAndroidLogin } from "@/lib/android-login";
 
 export const Route = createFileRoute("/auth")({
+  server: { handlers: { GET: ({ request, next }) => finishAndroidLogin(request) ?? next() } },
   head: () => ({
     meta: [
       { title: "Sign in — Synthforge" },

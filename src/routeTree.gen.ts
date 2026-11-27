@@ -16,6 +16,7 @@ import { Route as AuthenticatedCreatorsRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedNewRouteImport } from './routes/_authenticated/new'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as ApiMobileRouteImport } from './routes/api.mobile'
 import { Route as AuthenticatedProductsIdRouteImport } from './routes/_authenticated/products.$id'
 
 const IndexRoute = IndexRouteImport.update({
@@ -52,6 +53,11 @@ const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiMobileRoute = ApiMobileRouteImport.update({
+  id: '/api/mobile',
+  path: '/api/mobile',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedProductsIdRoute = AuthenticatedProductsIdRouteImport.update({
   id: '/products/$id',
   path: '/products/$id',
@@ -65,6 +71,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/new': typeof AuthenticatedNewRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/api/mobile': typeof ApiMobileRoute
   '/products/$id': typeof AuthenticatedProductsIdRoute
 }
 export interface FileRoutesByTo {
@@ -74,6 +81,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/new': typeof AuthenticatedNewRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/api/mobile': typeof ApiMobileRoute
   '/products/$id': typeof AuthenticatedProductsIdRoute
 }
 export interface FileRoutesById {
@@ -85,6 +93,7 @@ export interface FileRoutesById {
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/new': typeof AuthenticatedNewRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
+  '/api/mobile': typeof ApiMobileRoute
   '/_authenticated/products/$id': typeof AuthenticatedProductsIdRoute
 }
 export interface FileRouteTypes {
@@ -96,6 +105,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/new'
     | '/settings'
+    | '/api/mobile'
     | '/products/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -105,6 +115,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/new'
     | '/settings'
+    | '/api/mobile'
     | '/products/$id'
   id:
     | '__root__'
@@ -115,6 +126,7 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard'
     | '/_authenticated/new'
     | '/_authenticated/settings'
+    | '/api/mobile'
     | '/_authenticated/products/$id'
   fileRoutesById: FileRoutesById
 }
@@ -122,6 +134,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiMobileRoute: typeof ApiMobileRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -175,6 +188,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/mobile': {
+      id: '/api/mobile'
+      path: '/api/mobile'
+      fullPath: '/api/mobile'
+      preLoaderRoute: typeof ApiMobileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/products/$id': {
       id: '/_authenticated/products/$id'
       path: '/products/$id'
@@ -208,6 +228,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiMobileRoute: ApiMobileRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
