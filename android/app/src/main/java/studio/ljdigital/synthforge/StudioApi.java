@@ -142,11 +142,18 @@ final class StudioApi {
     JSONObject mobile(String action,JSONObject data) throws Exception {
         return new JSONObject(string(authorized(MOBILE,"POST",json("action",action,"data",data),null)));
     }
+    byte[] kit(String id) throws Exception {return authorized(MOBILE,"POST",json("action","pdf","data",json("id",id,"kit",true)),null);}
     byte[] pdf(String id) throws Exception {return authorized(MOBILE,"POST",json("action","pdf","data",json("id",id)),null);}
+    private String owner() throws Exception {
+        String payload = token(false).split("\\.")[1];
+        return new JSONObject(string(Base64.decode(payload, Base64.URL_SAFE))).getString("sub");
+    }
     JSONObject insert(String table,JSONObject row) throws Exception {
+        row.put("user_id",owner());
         return new JSONArray(string(authorized(DB+"/rest/v1/"+table,"POST",row,"return=representation"))).getJSONObject(0);
     }
     void insertChapters(JSONArray rows) throws Exception {
+        String user=owner(); for(int i=0;i<rows.length();i++) rows.getJSONObject(i).put("user_id",user);
         // PostgREST accepts arrays for a single transactional bulk insert.
         authorized(DB+"/rest/v1/chapters","POST",rows,"return=minimal");
     }

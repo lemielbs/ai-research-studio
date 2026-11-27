@@ -4,7 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { buildPdf } from "./pdf";
 
 export const mobilePdf = createServerFn({ method: "POST" }).middleware([requireSupabaseAuth])
-  .inputValidator((value) => z.object({ id: z.string().uuid() }).parse(value))
+  .inputValidator((value) => z.object({ id: z.string().uuid(), kit: z.boolean().optional() }).parse(value))
   .handler(async ({ data, context }) => {
     const db = context.supabase;
     const { data: book, error } = await db.from("products").select("*").eq("id", data.id).eq("user_id", context.userId).single();
@@ -14,9 +14,15 @@ export const mobilePdf = createServerFn({ method: "POST" }).middleware([requireS
     const chapters = result.data.filter((c: { content: string }) => c.content?.trim());
     if (!chapters.length) throw new Error("Write a chapter before exporting.");
     const design = book.design ?? {};
-    const pdf = await buildPdf({ title: book.title, subtitle: book.subtitle, productType: book.product_type, cover: book.cover_url,
+    const presentation = { title: book.title, subtitle: book.subtitle, productType: book.product_type, cover: book.cover_url,
       theme: design.theme, customStyle: design.theme === "custom" ? design.customStyle : undefined,
       coverLayout: design.coverTemplate ?? design.coverLayout, completeCover: design.coverMode === "complete", coverByline: design.coverByline,
-      sources: design.research?.sources, audience: book.audience, promise: book.promise }, chapters);
+      sources: design.research?.sources, audience: book.audience, promise: book.promise };
+    if (data.kit) {
+      const { buildLaunchKit } = await import("./launch-kit");
+      const bytes = await buildLaunchKit(presentation, result.data, book.sales_kit);
+      return new Response(new Uint8Array(bytes).buffer, { headers: { "Content-Type": "application/zip", "Cache-Control": "private, no-store" } });
+    }
+    const pdf = await buildPdf(presentation, chapters);
     return new Response(pdf.output("arraybuffer"), { headers: { "Content-Type": "application/pdf", "Cache-Control": "private, no-store" } });
   });
