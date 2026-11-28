@@ -1,10 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import type { Database } from "@/integrations/supabase/types";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { writeChapter, generateSalesKit, generateCover, planImages, generateSectionImage, recommendDesign, reviewProductDraft, previewDraftFix, applyDraftFix, type DraftFix, type DraftReview, type ProductBrief, type ProductResearch, type CreatorVoice } from "@/lib/ai.functions";
+import { writeChapter, saveGeneratedChapter, generateSalesKit, generateCover, planImages, generateSectionImage, recommendDesign, reviewProductDraft, previewDraftFix, applyDraftFix, type DraftFix, type DraftReview, type ProductBrief, type ProductResearch, type CreatorVoice } from "@/lib/ai.functions";
 import { COVER_LAYOUTS, COVER_TEMPLATE_IDS, THEMES, getTheme, rgb, type Theme } from "@/lib/themes";
 import { mdToHtml } from "@/lib/markdown";
 import { isMarketCountry, marketCountryName } from "@/lib/markets";
@@ -315,6 +316,7 @@ function ProductPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const writeFn = useServerFn(writeChapter);
+  const saveGeneratedFn = useServerFn(saveGeneratedChapter);
   const kitFn = useServerFn(generateSalesKit);
   const coverFn = useServerFn(generateCover);
   const planFn = useServerFn(planImages);
@@ -336,6 +338,19 @@ function ProductPage() {
   const [writingAll, setWritingAll] = useState(false);
   const reviewInProgress = useRef(false);
   const writingAllInProgress = useRef(false);
+  const chapterInProgress = useRef(false);
+  const imageInProgress = useRef(false);
+  const actionInProgress = useRef(false);
+  const pauseWriting = useRef(false);
+  const pauseImages = useRef(false);
+  const retryIds = useRef(new Map<string, string>());
+  const retryId = (scope: string) => {
+    const key = id + ":" + scope;
+    const requestId = retryIds.current.get(key) ?? crypto.randomUUID();
+    retryIds.current.set(key, requestId);
+    return requestId;
+  };
+  const finishRequest = (scope: string) => retryIds.current.delete(id + ":" + scope);
   const [savingStyle, setSavingStyle] = useState(false);
   const [imgProgress, setImgProgress] = useState<{ done: number; total: number } | null>(null);
   const [imgBusy, setImgBusy] = useState<string | null>(null);
@@ -376,23 +391,25 @@ function ProductPage() {
 
   const outlineText = (data?.ch ?? []).map((c, i) => `${i + 1}. ${c.title} — ${c.summary ?? ""}`).join("\n");
 
-  const writeOne = async (c: { id: string; title: string; summary: string | null }) => {
-    if (!data) return;
+  const writeOne = async (c: Database["public"]["Tables"]["chapters"]["Row"]) => {
+    if (!data || chapterInProgress.current) return;
+    chapterInProgress.current = true;
+    const scope = "chapter:" + c.id;
     setWriting(c.id);
     try {
       const r = await writeFn({ data: {
         productTitle: data.p.title, productType: data.p.product_type, audience: data.p.audience ?? "", tone: data.p.tone ?? "friendly",
         subtitle: (data.p.subtitle ?? "").slice(0, 300), promise: (data.p.promise ?? "").slice(0, 500),
         isFinalChapter: data.ch.at(-1)?.id === c.id,
-        chapterTitle: c.title, summary: c.summary ?? "", outline: outlineText.slice(0, 4000), brief: design?.brief ?? undefined, research: design?.research ?? undefined, creatorVoice: design?.creatorVoice ?? undefined, marketCountry,
+        chapterTitle: c.title, chapterId: c.id, ...(c.content.trim() ? { requestId: retryId(scope) } : {}), summary: c.summary ?? "", outline: outlineText.slice(0, 4000), brief: design?.brief ?? undefined, research: design?.research ?? undefined, creatorVoice: design?.creatorVoice ?? undefined, marketCountry,
       } });
-      const { error } = await supabase.from("chapters").update({ content: r.content }).eq("id", c.id);
-      if (error) throw error;
+      await saveGeneratedFn({ data: { chapterId: c.id, productId: id, previous: c.content, content: r.content } });
+      finishRequest(scope);
       setReview(null);
       setReviewError("");
       await refresh();
     } catch (e) { toast.error((e as Error).message); throw e; }
-    finally { setWriting(null); }
+    finally { chapterInProgress.current = false; setWriting(null); }
   };
 
   const runReview = async () => {
@@ -447,11 +464,19 @@ function ProductPage() {
   };
 
   const writeAll = async () => {
-    if (!data || writingAllInProgress.current || reviewInProgress.current) return;
+    if (!data || writingAllInProgress.current || chapterInProgress.current || reviewInProgress.current) return;
     writingAllInProgress.current = true;
+    pauseWriting.current = false;
     setWritingAll(true);
     try {
-      for (const c of data.ch) if (!c.content.trim()) await writeOne(c);
+      for (const c of data.ch) {
+        if (pauseWriting.current) break;
+        if (!c.content.trim()) await writeOne(c);
+      }
+      if (pauseWriting.current) {
+        toast.info("Writing paused. Use Write remaining to continue from saved chapters.");
+        return;
+      }
       const { error } = await supabase.from("products").update({ status: "written" }).eq("id", id);
       if (error) {
         toast.error(error.message);
@@ -477,8 +502,12 @@ function ProductPage() {
   }, [autowrite, data]);
 
   const task = async (name: string, fn: () => Promise<void>) => {
+    if (actionInProgress.current) return;
+    actionInProgress.current = true;
     setBusy(name);
-    try { await fn(); await refresh(); } catch (e) { toast.error((e as Error).message); } finally { setBusy(null); }
+    try { await fn(); await refresh(); }
+    catch (e) { toast.error((e as Error).message); }
+    finally { actionInProgress.current = false; setBusy(null); }
   };
 
   const makeKit = () => task("kit", async () => {
@@ -543,6 +572,7 @@ function ProductPage() {
   const makeCover = (mode: "complete" | "artwork") => task("cover", async () => {
     const r = await coverFn({ data: {
       productId: id,
+      requestId: retryId("cover:" + mode),
       title: data!.p.title.slice(0, 200), topic: data!.p.topic.slice(0, 300),
       subtitle: (data!.p.subtitle ?? "").slice(0, 300), promise: (data!.p.promise ?? "").slice(0, 400),
       audience: (data!.p.audience ?? "").slice(0, 300), style: theme.imageStyle,
@@ -554,6 +584,7 @@ function ProductPage() {
     } });
     if (mode === "complete") await saveCompleteCover(r.dataUrl);
     else await updateCover(r.dataUrl);
+    finishRequest("cover:" + mode);
   });
 
   const saveByline = (value: string) => task("byline", async () => {
@@ -610,13 +641,20 @@ function ProductPage() {
     }
   };
 
-  const oneImage = async (cid: string, prompt: string, referenceImage?: string, preserveUploads = false) => {
-    const r = await imgFn({ data: { productId: id, prompt, style: theme.imageStyle, referenceImage } });
+  const oneImage = async (cid: string, prompt: string, referenceImage?: string, replace = false, protectUploads = false) => {
+    const scope = "image:" + cid;
+    const r = await imgFn({ data: {
+      productId: id, chapterId: cid, prompt, style: theme.imageStyle, referenceImage,
+      ...(replace ? { requestId: retryId(scope) } : {}),
+    } });
     const update = supabase.from("chapters").update({ image_url: r.dataUrl, image_prompt: prompt })
       .eq("product_id", id).eq("id", cid);
-    // Uploaded pictures have no AI prompt. Recheck before saving in case another tab uploaded one.
-    const { error } = await (preserveUploads ? update.or("image_url.is.null,image_prompt.not.is.null") : update);
+    const guarded = !replace ? update.is("image_url", null)
+      : protectUploads ? update.or("image_url.is.null,image_prompt.not.is.null") : update;
+    const { data: saved, error } = await guarded.select("id").maybeSingle();
     if (error) throw error;
+    if (!saved) throw new Error("This chapter’s artwork changed. Refresh before trying again.");
+    finishRequest(scope);
     return r.dataUrl;
   };
 
@@ -639,38 +677,62 @@ function ProductPage() {
     }
   };
 
-  const makeImages = async () => {
-    if (!data || picturesBusy) return;
-    const eligible = data.ch.filter((c) => !c.image_url || c.image_prompt !== null);
-    if (!eligible.length) return;
+  const visualPlan = (chapters: Database["public"]["Tables"]["chapters"]["Row"][]) => planFn({ data: {
+    title: data!.p.title.slice(0, 200), topic: data!.p.topic.slice(0, 300),
+    audience: (data!.p.audience ?? "").slice(0, 300), objective: (data!.p.promise ?? "").slice(0, 500),
+    style: theme.imageStyle, marketCountry,
+    chapters: chapters.slice(0, 20).map((chapter) => ({
+      id: chapter.id, pageId: "chapter-" + chapter.position, title: chapter.title.slice(0, 200),
+      summary: (chapter.summary ?? "").slice(0, 900), excerpt: chapter.content.slice(0, 1800),
+    })),
+  } });
+
+  const makeImages = async (regenerate = false) => {
+    if (!data || picturesBusy || imageInProgress.current) return;
+    const eligible = new Set(data.ch.filter((chapter) => regenerate ? chapter.image_prompt !== null : !chapter.image_url).map((chapter) => chapter.id));
+    if (!eligible.size) return;
+    imageInProgress.current = true;
+    pauseImages.current = false;
+    setImgProgress({ done: 0, total: 1 });
     try {
-      setImgProgress({ done: 0, total: 1 });
-      const plan = await planFn({ data: { title: data.p.title, chapters: eligible.map((c) => ({ id: c.id, title: c.title, summary: (c.summary ?? "").slice(0, 900) })) } });
-      const items = plan.images.filter((x) => eligible.some((c) => c.id === x.id));
+      const plan = await visualPlan(data.ch);
+      const items = plan.images.filter((image) => eligible.has(image.id));
+      if (!items.length) {
+        toast.info("No additional illustrations were suggested. You can add an image to an individual chapter.");
+        return;
+      }
       setImgProgress({ done: 0, total: items.length });
       let referenceImage = coverReference?.image_url ?? data.p.cover_url ?? undefined;
-      for (const [k, it] of items.entries()) {
-        try {
-          const featuresCharacter = it.featuresCharacter === true;
-          const prompt = featuresCharacter ? CHARACTER_SCENE + it.prompt : it.prompt;
-          const image = await oneImage(it.id, prompt, featuresCharacter ? referenceImage : undefined, true);
-          if (featuresCharacter) referenceImage ??= image;
-        } catch (e) { toast.error((e as Error).message); }
-        setImgProgress({ done: k + 1, total: items.length });
+      for (const [index, item] of items.entries()) {
+        if (pauseImages.current) break;
+        const featuresCharacter = item.featuresCharacter === true;
+        const prompt = featuresCharacter ? CHARACTER_SCENE + item.prompt : item.prompt;
+        const image = await oneImage(item.id, prompt, featuresCharacter ? referenceImage : undefined, regenerate, true);
+        if (featuresCharacter) referenceImage ??= image;
+        setImgProgress({ done: index + 1, total: items.length });
         await refresh();
       }
-      toast.success("Pictures ready!");
-    } catch (e) { toast.error((e as Error).message); }
-    finally { setImgProgress(null); }
+      if (pauseImages.current) toast.info("Illustrations paused. Saved pictures will be kept when you resume.");
+      else toast.success("Pictures ready!");
+    } catch (error) { toast.error((error as Error).message); }
+    finally { imageInProgress.current = false; setImgProgress(null); }
   };
 
-  const redoImage = async (c: { id: string; title: string; summary: string | null; image_prompt: string | null }) => {
-    setImgBusy(c.id);
+  const redoImage = async (chapter: Database["public"]["Tables"]["chapters"]["Row"]) => {
+    if (imageInProgress.current || picturesBusy) return;
+    imageInProgress.current = true;
+    setImgBusy(chapter.id);
     try {
-      await oneImage(c.id, c.image_prompt || `${c.title}: ${c.summary ?? ""}`, coverReference?.image_url ?? data?.p.cover_url ?? undefined);
+      const planned = !chapter.image_prompt ? (await visualPlan([chapter])).images[0] : undefined;
+      const prompt = chapter.image_prompt || (planned
+        ? (planned.featuresCharacter ? CHARACTER_SCENE : "") + planned.prompt
+        : "Illustrate this chapter’s central objective: " + (chapter.content.trim() || chapter.summary || chapter.title).slice(0, 850));
+      const showsCharacter = planned?.featuresCharacter ?? prompt.startsWith(CHARACTER_SCENE);
+      const reference = showsCharacter ? coverReference?.image_url ?? data?.p.cover_url ?? undefined : undefined;
+      await oneImage(chapter.id, prompt, reference, true);
       await refresh();
-    }
-    catch (e) { toast.error((e as Error).message); } finally { setImgBusy(null); }
+    } catch (error) { toast.error((error as Error).message); }
+    finally { imageInProgress.current = false; setImgBusy(null); }
   };
 
   const removeImage = (cid: string) => task("rmimg", async () => {
@@ -806,6 +868,7 @@ function ProductPage() {
         </div>
         <div className="flex gap-2">
           {done < ch.length && <Button disabled={reviewBusy} onClick={writeAll}>{writing ? "Writing…" : "Write remaining"}</Button>}
+          {writingAll && <Button variant="outline" onClick={() => { pauseWriting.current = true; }}>Pause after current chapter</Button>}
           <Button variant="outline" disabled={!done} onClick={download}>Download PDF</Button>
           <Button variant="ghost" onClick={del}>Delete</Button>
         </div>
@@ -1070,9 +1133,13 @@ function ProductPage() {
                 <h2 className="text-2xl font-bold">Pictures inside the PDF</h2>
                 <p className="text-sm text-muted-foreground">Upload a JPG, PNG, or WebP up to 15 MB, or generate pictures with AI.</p>
               </div>
-              <Button disabled={picturesBusy || !ch.some((c) => !c.image_url || c.image_prompt !== null)} onClick={makeImages}>
-                {imgProgress ? `Creating ${imgProgress.done}/${imgProgress.total}…` : ch.some((c) => c.image_url && c.image_prompt !== null) ? "Redo AI pictures" : "Generate pictures"}
+              <Button disabled={picturesBusy || !ch.some((c) => !c.image_url)} onClick={() => void makeImages()}>
+                {imgProgress ? `Creating ${imgProgress.done}/${imgProgress.total}…` : "Generate missing pictures"}
               </Button>
+              {!imgProgress && ch.some((chapter) => chapter.image_url && chapter.image_prompt) && (
+                <Button variant="outline" disabled={picturesBusy} onClick={() => void makeImages(true)}>Regenerate AI pictures</Button>
+              )}
+              {imgProgress && <Button variant="outline" onClick={() => { pauseImages.current = true; }}>Pause after current image</Button>}
             </div>
             <input
               ref={photoPicker}

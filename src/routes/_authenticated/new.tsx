@@ -89,6 +89,7 @@ function NewProduct() {
   const [step, setStep] = useState(1);
   const [pending, setPending] = useState<"ideas" | "titles" | "angles" | "outline" | "create" | "automatic" | null>(null);
   const busy = pending !== null;
+  const creating = useRef(false);
   const stepHeading = useRef<HTMLHeadingElement>(null);
   const [topic, setTopic] = useState("");
   const [audience, setAudience] = useState("");
@@ -102,8 +103,12 @@ function NewProduct() {
   useEffect(() => { if (step > 1) stepHeading.current?.focus(); }, [step]);
 
   const run = async <T,>(action: NonNullable<typeof pending>, fn: () => Promise<T>): Promise<T | undefined> => {
+    if (creating.current) return undefined;
+    creating.current = true;
     setPending(action);
-    try { return await fn(); } catch (e) { toast.error((e as Error).message); } finally { setPending(null); }
+    try { return await fn(); }
+    catch (error) { toast.error((error as Error).message); }
+    finally { creating.current = false; setPending(null); }
     return undefined;
   };
 
@@ -158,7 +163,10 @@ function NewProduct() {
     if (!chapterRows.length) throw new Error("The draft needs at least one chapter.");
     const buyer = angle.brief?.buyer ?? audience;
     const design = await designFn({ data: { title: angle.title, subtitle: angle.subtitle.slice(0, 300), promise: (angle.promise ?? "").slice(0, 400), topic: topic.trim(), audience: buyer, tone, marketCountry } })
-      .catch(() => ({ theme: "minimal", reason: "", coverLayout: "split" as const }));
+      .catch(() => {
+        toast.info("AI visual design was unavailable. Your draft will use the standard layout until you choose a style.");
+        return { theme: "minimal", reason: "", coverLayout: "split" as const };
+      });
     const { data: product, error } = await supabase.from("products").insert({
       title: angle.title, subtitle: angle.subtitle, topic: topic.trim(), audience: buyer,
       product_type: angle.productType, tone, status: "outline", promise: angle.promise ?? null,
