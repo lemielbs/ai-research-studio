@@ -33,6 +33,7 @@ function Settings() {
     queryKey: ["ai-status"],
     queryFn: () => statusFn(),
   });
+  const [editingKey, setEditingKey] = useState<"openai" | "anthropic">();
   const [openAIKey, setOpenAIKey] = useState("");
   const [claudeKey, setClaudeKey] = useState("");
   const [choice, setChoice] = useState<{ preference: ContentProvider; claudeModel: ClaudeModel }>();
@@ -58,7 +59,7 @@ function Settings() {
   return (
     <main className="mx-auto max-w-2xl space-y-6 px-6 py-12">
       <h1 className="text-4xl font-bold">Settings</h1>
-      {isLoading && <p role="status">Loading AI settings…</p>}
+      {isLoading && <p role="status">Loading AI settings.</p>}
       {error && <p role="alert">{error.message}</p>}
       {data && options && (
         <>
@@ -68,15 +69,15 @@ function Settings() {
               className="space-y-2"
               onSubmit={(event) => {
                 event.preventDefault();
+                if (busy || editingKey !== "openai" || openAIKey.trim().length < 20) return;
                 void run(async () => {
                   await saveOpenAI({ data: { key: openAIKey } });
                   setOpenAIKey("");
+                  setEditingKey(undefined);
                 }, "OpenAI key saved.");
               }}
             >
-              <label htmlFor="openai-key" className="font-medium">
-                OpenAI API key
-              </label>
+              <h3 className="font-medium">OpenAI API key</h3>
               <p className="text-sm text-muted-foreground">
                 Required for AI covers, interior images, and visual styles. Also writes content when
                 OpenAI is selected.
@@ -88,18 +89,50 @@ function Settings() {
                     ? "A server key is available for the owner"
                     : "No key saved"}
               </p>
-              <Input
-                id="openai-key"
-                type="password"
-                autoComplete="off"
-                maxLength={300}
-                value={openAIKey}
-                onChange={(event) => setOpenAIKey(event.target.value)}
-              />
+              {editingKey === "openai" && (
+                <Input
+                  aria-label="OpenAI API key"
+                  id="openai-key"
+                  type="password"
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  maxLength={300}
+                  value={openAIKey}
+                  onChange={(event) => setOpenAIKey(event.target.value)}
+                />
+              )}
               <div className="flex flex-wrap gap-2">
-                <Button disabled={busy || openAIKey.trim().length < 20}>
-                  {data.hasKey ? "Replace OpenAI key" : "Validate and save"}
-                </Button>
+                {editingKey === "openai" ? (
+                  <>
+                    <Button disabled={busy || openAIKey.trim().length < 20}>
+                      Validate and save
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => {
+                        setOpenAIKey("");
+                        setEditingKey(undefined);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setOpenAIKey("");
+                      setClaudeKey("");
+                      setEditingKey(undefined);
+                      setEditingKey("openai");
+                    }}
+                  >
+                    {data.hasKey ? "Replace OpenAI key" : "Add OpenAI key"}
+                  </Button>
+                )}
                 {data.hasKey && (
                   <Button
                     type="button"
@@ -116,31 +149,61 @@ function Settings() {
               className="space-y-2 border-t pt-5"
               onSubmit={(event) => {
                 event.preventDefault();
+                if (busy || editingKey !== "anthropic" || claudeKey.trim().length < 20) return;
                 void run(async () => {
                   await saveClaude({ data: { key: claudeKey } });
                   setClaudeKey("");
                 }, "Anthropic key saved.");
               }}
             >
-              <label htmlFor="anthropic-key" className="font-medium">
-                Anthropic API key (optional)
-              </label>
+              <h3 className="font-medium">Anthropic API key (optional)</h3>
               <p className="text-sm text-muted-foreground">
                 Enables Claude for outlines, manuscript text, and revisions.
               </p>
               <p className="text-sm">{data.hasClaude ? "Key saved" : "No key saved"}</p>
-              <Input
-                id="anthropic-key"
-                type="password"
-                autoComplete="off"
-                maxLength={300}
-                value={claudeKey}
-                onChange={(event) => setClaudeKey(event.target.value)}
-              />
+              {editingKey === "anthropic" && (
+                <Input
+                  aria-label="Anthropic API key"
+                  id="anthropic-key"
+                  type="password"
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  maxLength={300}
+                  value={claudeKey}
+                  onChange={(event) => setClaudeKey(event.target.value)}
+                />
+              )}
               <div className="flex flex-wrap gap-2">
-                <Button disabled={busy || claudeKey.trim().length < 20}>
-                  {data.hasClaude ? "Replace Anthropic key" : "Validate and save"}
-                </Button>
+                {editingKey === "anthropic" ? (
+                  <>
+                    <Button disabled={busy || claudeKey.trim().length < 20}>
+                      Validate and save
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => {
+                        setClaudeKey("");
+                        setEditingKey(undefined);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setOpenAIKey("");
+                      setClaudeKey("");
+                      setEditingKey("anthropic");
+                    }}
+                  >
+                    {data.hasClaude ? "Replace Anthropic key" : "Add Anthropic key"}
+                  </Button>
+                )}
                 {data.hasClaude && (
                   <Button
                     type="button"
@@ -220,7 +283,7 @@ function Settings() {
             )}
             {data.owner && !data.hasOpenAI && !data.hasClaude && (
               <p className="text-sm text-muted-foreground">
-                The owner’s existing Lovable AI plan is available in Automatic mode until an API key
+                The owner's existing Lovable AI plan is available in Automatic mode until an API key
                 is connected.
               </p>
             )}
