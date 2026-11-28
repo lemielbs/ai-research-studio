@@ -13,9 +13,9 @@ export const Route = createFileRoute("/auth")({
   server: { handlers: { GET: ({ request, next }) => finishAndroidLogin(request) ?? next() } },
   head: () => ({
     meta: [
-      { title: "Sign in — Synthforge" },
+      { title: "Sign in - Synthforge" },
       { name: "description", content: "Sign in or create your Synthforge account." },
-      { property: "og:title", content: "Sign in — Synthforge" },
+      { property: "og:title", content: "Sign in - Synthforge" },
       { property: "og:description", content: "Sign in or create your Synthforge account." },
     ],
   }),
@@ -24,12 +24,14 @@ export const Route = createFileRoute("/auth")({
 
 function AuthPage() {
   const navigate = useNavigate();
+  const [showGoogle, setShowGoogle] = useState(false);
   const [mode, setMode] = useState<"in" | "up">("in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    setShowGoogle(!/Android.*; wv\)/i.test(navigator.userAgent));
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) navigate({ to: "/dashboard" });
     });
@@ -76,6 +78,7 @@ function AuthPage() {
       <div className="w-full max-w-sm rounded-2xl border bg-card p-8">
         <Link to="/"><Logo /></Link>
         <h1 className="mt-6 text-2xl font-bold">{mode === "in" ? "Welcome back" : "Create your account"}</h1>
+        {showGoogle && <>
         <button
           type="button"
           onClick={google}
@@ -85,6 +88,7 @@ function AuthPage() {
           Continue with Google
         </button>
         <div className="my-5 text-center text-xs text-muted-foreground">or</div>
+        </>}
         <form onSubmit={submit} className="space-y-4">
           <div className="space-y-1.5"><Label htmlFor="email">Email</Label><Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></div>
           <div className="space-y-1.5"><Label htmlFor="pw">Password</Label><Input id="pw" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} /></div>

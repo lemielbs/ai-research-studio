@@ -5,10 +5,11 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { supabase } from "@/integrations/supabase/client";
 import { getAiStatus, saveMyKey, removeMyKey } from "@/lib/ai.functions";
 
 export const Route = createFileRoute("/_authenticated/settings")({
-  head: () => ({ meta: [{ title: "Settings — Synthforge" }] }),
+  head: () => ({ meta: [{ title: "Settings - Synthforge" }] }),
   component: Settings,
 });
 
@@ -18,6 +19,7 @@ function Settings() {
   const saveFn = useServerFn(saveMyKey);
   const removeFn = useServerFn(removeMyKey);
   const { data } = useQuery({ queryKey: ["ai-status"], queryFn: () => statusFn() });
+  const [password, setPassword] = useState("");
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -36,15 +38,30 @@ function Settings() {
         {(
           <>
             <p className="mt-2 text-muted-foreground">{data?.owner ? "You're the owner: Lovable AI credits are used first, then the OpenAI key you save here." : "Every teammate uses their own OpenAI key."} Get one at platform.openai.com/api-keys (needs a funded balance). Only you can see it.</p>
-            <p className="mt-4 text-sm">{data?.hasKey ? "✓ Key saved" : "No key saved yet"}</p>
+            <p className="mt-4 text-sm">{data?.hasKey ? "� Key saved" : "No key saved yet"}</p>
             <div className="mt-3 flex gap-2">
               <Input type="password" placeholder="sk-..." value={key} onChange={(e) => setKey(e.target.value)} />
-              <Button disabled={busy || key.length < 20} onClick={save}>{busy ? "Checking…" : "Save"}</Button>
+              <Button disabled={busy || key.length < 20} onClick={save}>{busy ? "Checking." : "Save"}</Button>
             </div>
             {data?.hasKey && <Button variant="ghost" size="sm" className="mt-3" onClick={async () => { await removeFn(); qc.invalidateQueries({ queryKey: ["ai-status"] }); }}>Remove my key</Button>}
           </>
         )}
       </section>
+      <form className="mt-6 space-y-3 rounded-2xl border bg-card p-6" onSubmit={async e => {
+        e.preventDefault();
+        setBusy(true);
+        try {
+          const {error} = await supabase.auth.updateUser({password});
+          if(error) throw error;
+          setPassword(""); toast.success("Password saved.");
+        } catch(error){toast.error(error instanceof Error ? error.message : "Could not save password.");}
+        finally {setBusy(false);}
+      }}>
+        <h2 className="text-xl font-semibold">Account password</h2>
+        <label htmlFor="pw-new">New password</label>
+        <Input id="pw-new" autoComplete="new-password" required minLength={6} type="password" value={password} onChange={e=>setPassword(e.target.value)} />
+        <Button disabled={busy}>Save password</Button>
+      </form>
     </main>
   );
 }
