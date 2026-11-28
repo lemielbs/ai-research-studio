@@ -1,0 +1,19 @@
+# SynthForge AI providers
+
+The default setting is Automatic. An account with just an OpenAI key uses OpenAI for writing and images. Connecting an Anthropic key makes Automatic prefer Claude for writing. Users can explicitly select OpenAI or Claude in Settings. A Claude-only account can draft, edit and export text, and use existing artwork or uploads. AI design, cover and illustration generation, live web research and source verification require OpenAI. The owner can use the existing Lovable gateway in Automatic when neither direct provider is configured. A failed provider call does not switch providers. Users can change Settings before retrying.
+
+Existing manuscripts stay in Markdown, with the same headings, table normalization, workbook fields and mini-course sections used by the editor and PDF renderer. Durable chapter IDs and chapter order remain the reference for picture placement. Page numbers are assigned by the PDF layout. Visual prompts use manuscript excerpts and existing style settings. They do not write back to the manuscript.
+
+## Deployment
+
+1. Deploy to a staging Supabase project and Netlify preview first. Set the existing Supabase URL and publishable key variables, plus `SUPABASE_SERVICE_ROLE_KEY` in Netlify's server environment. Use the staging project's service-role or secret key. Never prefix it with `VITE_` or expose it to the browser.
+2. Run [ai-provider-migration.sql](./ai-provider-migration.sql) in the Supabase SQL Editor. It leaves existing OpenAI keys and all product data in place. It adds a private settings table and generation reservations. It revokes database API grants on the legacy key table for browser roles. Existing browser and native app builds continue using server functions after those functions are updated.
+3. Deploy the new server and frontend in the same release window as the migration. The old server cannot access the key table once the migration revokes its grants. Recheck auth and the production browser, and confirm the credential tables deny normal authenticated access. Recheck an existing OpenAI account before enrolling a Claude account.
+4. Verify Automatic, explicit OpenAI, and both Claude models using separate staging credentials and an existing sample book. Verify a workbook with a table, a fillable field, and a previewed or downloaded PDF. Generate a cover and an interior picture with OpenAI and verify that the working manuscript persists after an interrupted batch.
+5. Set up scheduled deletion of expired generation rows in your hosting/database scheduler using `delete from public.ai_generation_requests where expires_at < now();`. The app also removes expired rows when the same user starts another reserved generation. Never log credential values or generation payloads from these tables.
+
+Only the authenticated server reads or modifies credentials, and all reads and writes are scoped to the verified user ID. Provider keys are stored in tables restricted to the service role. Browser credentials cannot read those rows once grants are revoked. If the project previously exposed a key outside its owner, rotate it at the provider.
+
+For a rollback, keep the new database tables intact and deploy the previous app only if it can read the existing key table with a server credential. Restoring the old authenticated grants would also restore direct browser access to each user's OpenAI key. Prefer patching forward.
+
+Bulk writing and illustration jobs can pause after the current item so completed work stays saved. Reservations reduce duplicate charges for matching requests and let clients reuse a recent successful result. They cannot undo an upstream charge or guarantee exactly-once billing if a provider accepts a request and the server is interrupted before persisting its result. Wait for the reservation to expire when the provider has not confirmed a response.

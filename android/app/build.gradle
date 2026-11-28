@@ -1,0 +1,12 @@
+plugins { id 'com.android.application' version '8.7.3' }
+android {
+    namespace 'studio.ljdigital.synthforge'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'studio.ljdigital.synthforge'
+        minSdk 23
+        targetSdk 35
+        versionCode 4
+        versionName '2.2'
+    }
+}
